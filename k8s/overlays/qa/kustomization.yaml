@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - ingress.yaml
+  - service-account.yaml
+  - secret-provider-class.yaml
+
+patchesStrategicMerge:
+  - deployment.yaml   
+
+images:
+  - name: pnc360-frontend
+    newName: aurainsure.azurecr.io/pnc360-frontend-qa

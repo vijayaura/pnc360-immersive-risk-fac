@@ -1,0 +1,1 @@
+ALTER TABLE public.submission_properties ADD COLUMN IF NOT EXISTS facility_3d_data jsonb DEFAULT NULL;

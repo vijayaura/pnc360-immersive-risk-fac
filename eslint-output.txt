@@ -1,0 +1,44 @@
+[0m[0m
+[0m[4mE:\AURA-2\PNC-UAT\aura-pnc-360\src\features\product-config\pages\SingleProductConfig.tsx[24m[0m
+[0m   [2m291:18[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m   [2m434:62[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m   [2m784:28[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m1271:65[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m1505:6[22m   [33mwarning[39m  React Hook useEffect has a missing dependency: 'selectedTemplateId'. Either include it or remove the dependency array       [2mreact-hooks/exhaustive-deps[22m[0m
+[0m  [2m1660:6[22m   [33mwarning[39m  React Hook useEffect has a missing dependency: 'isLoadingMetadata'. Either include it or remove the dependency array        [2mreact-hooks/exhaustive-deps[22m[0m
+[0m  [2m1778:6[22m   [33mwarning[39m  React Hook useEffect has a missing dependency: 'isLoadingPolicyWordings'. Either include it or remove the dependency array  [2mreact-hooks/exhaustive-deps[22m[0m
+[0m  [2m1859:39[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m2619:36[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m3705:66[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m4286:45[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m4451:20[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m4648:20[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m4835:20[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m5134:20[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m5282:20[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m5366:20[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m5493:20[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m5618:20[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m5655:23[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m5674:23[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m5773:55[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m5967:25[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m5972:24[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m5977:22[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m5982:30[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m5985:29[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m6005:7[22m   [31merror[39m    'apiResponse' is never reassigned. Use 'const' instead                                                                      [2mprefer-const[22m[0m
+[0m  [2m6063:84[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m6092:26[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m6490:54[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m6506:54[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m6778:70[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m7098:63[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m7228:53[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m7912:81[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m8038:63[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m8279:61[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m  [2m8476:39[22m  [31merror[39m    Unexpected any. Specify a different type                                                                                    [2m@typescript-eslint/no-explicit-any[22m[0m
+[0m[0m
+[0m[31m[1m✖ 39 problems (36 errors, 3 warnings)[22m[39m[0m
+[0m[31m[1m[22m[39m[0m

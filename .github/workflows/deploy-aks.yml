@@ -1,0 +1,76 @@
+name: Build Push Deploy UI to AKS UAT
+
+on:
+  push:
+    branches:
+      - azure-qa  
+
+env:
+  ACR_REPOSITORY: pnc360-frontend-qa
+  AKS_RESOURCE_GROUP: aura-qa-apps-rg
+  AKS_CLUSTER_NAME: aura-qa-aks
+  ENV: qa #
+  
+
+jobs:
+  build-push-and-deploy-qa:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Azure login
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # ACR login
+      - name: Login to ACR
+        uses: azure/docker-login@v2
+        with:
+          login-server: ${{ secrets.ACR_LOGIN_SERVER }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      # Image tag
+      - name: Set Image Tag
+        run: |
+          SHORT_SHA=${GITHUB_SHA::7}
+          echo "IMAGE_TAG=${SHORT_SHA}" >> $GITHUB_ENV
+
+      # Build Docker image
+      - name: Build Image
+        run: |
+          docker build --no-cache \
+            --build-arg VITE_API_BASE_URL=https://pnc360-api.qa.aurainsure.ai/api/v1 \
+            --build-arg VITE_APP_ENV=qa \
+            -t ${{ secrets.ACR_LOGIN_SERVER }}/$ACR_REPOSITORY:$IMAGE_TAG .
+          docker push ${{ secrets.ACR_LOGIN_SERVER }}/$ACR_REPOSITORY:$IMAGE_TAG
+
+      # Install kubectl + kustomize
+      - name: Install kubectl and kustomize
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+
+          curl -s https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh | bash
+          sudo mv kustomize /usr/local/bin/
+
+      # Set AKS context
+      - name: Set AKS Context
+        uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ env.AKS_RESOURCE_GROUP }}
+          cluster-name: ${{ env.AKS_CLUSTER_NAME }}
+
+      # Deploy to AKS
+      - name: Deploy to AKS
+        working-directory: k8s/overlays/qa
+        run: |
+          kustomize edit set image pnc360-frontend=${{ secrets.ACR_LOGIN_SERVER }}/$ACR_REPOSITORY:$IMAGE_TAG
+          kustomize build . | kubectl apply -f -
+          kubectl rollout status deployment/pnc360-frontend -n pnc
