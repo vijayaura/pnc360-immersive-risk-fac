@@ -160,7 +160,7 @@ const MarketAdminInsurerManagement = () => {
           <div className="flex justify-between items-center mb-8">
             <div className="flex items-center gap-4">
               <div>
-                <h1 className="text-4xl font-bold text-foreground mb-2">Underwriter Management</h1>
+                <h1 className="text-4xl font-bold text-foreground mb-2">Underwriters</h1>
                 <p className="text-lg text-muted-foreground">
                   Manage insurance companies and their product configurations
                 </p>

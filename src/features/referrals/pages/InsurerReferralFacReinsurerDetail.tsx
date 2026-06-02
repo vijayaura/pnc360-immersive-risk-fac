@@ -5,7 +5,8 @@ import ReinsurerBrokerRequestDetails from '@/features/reinsurer-brokers/pages/Re
 
 /**
  * Insurer referral → reinsurance → facultative reinsurer-line detail (demo).
- * Reuses reinsurer-broker reinsurer panels with path overrides so Back returns to the referral reinsurance breakdown.
+ * Same shell as `/reinsurer-broker/referral/:recordId/reinsurer/:id` (journey, summary, tabs, placement);
+ * path overrides keep navigation within the insurer referral (Back returns to referral overview, not reinsurance handling).
  */
 export default function InsurerReferralFacReinsurerDetail() {
   const { referralId } = useParams<{ referralId: string }>();
@@ -16,7 +17,8 @@ export default function InsurerReferralFacReinsurerDetail() {
         ? {
             referralBase: `/insurer/referral/${referralId}/reinsurance/fac`,
             dashboard: `/insurer/referral/${referralId}`,
-            backFromReinsurerDetail: `/insurer/referral/${referralId}/reinsurance`,
+            /** Return to referral overview, not the reinsurance handling sub-route. */
+            backFromReinsurerDetail: `/insurer/referral/${referralId}`,
           }
         : undefined,
     [referralId],
@@ -32,6 +34,7 @@ export default function InsurerReferralFacReinsurerDetail() {
       pathOverrides={pathOverrides}
       requesterChatRole="insurer"
       submissionSourceLabel="Insurer underwriting referral"
+      embedInwardFacLayout
     />
   );
 }

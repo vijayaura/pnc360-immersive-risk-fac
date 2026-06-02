@@ -49,7 +49,7 @@ export function ReinsurerBrokerLayout() {
                 <img src={siteLogo} alt="Aura" className="h-8 w-auto object-contain" />
               </div>
               <div>
-                <h2 className="text-lg font-extrabold text-slate-200">Reinsurer Broker</h2>
+                <h2 className="text-lg font-extrabold text-slate-200">Reinsurance Requester</h2>
                 <p className="text-sm text-slate-400">Facultative placement portal</p>
               </div>
             </div>
@@ -59,9 +59,9 @@ export function ReinsurerBrokerLayout() {
             <SidebarGroup>
               <div className="mb-6 p-3 bg-primary/5 rounded-lg border">
                 <p className="text-sm font-semibold text-sidebar-foreground mb-1">
-                  {user?.name || 'Demo Reinsurance Broker'}
+                  {user?.name || 'Demo Reinsurance Requester'}
                 </p>
-                <p className="text-xs font-medium text-sidebar-foreground/80">Reinsurance Broker</p>
+                <p className="text-xs font-medium text-sidebar-foreground/80">Reinsurance Requester</p>
               </div>
 
               <SidebarGroupLabel className="text-xs font-semibold text-sidebar-foreground/70 uppercase tracking-wider mb-3">
@@ -90,7 +90,7 @@ export function ReinsurerBrokerLayout() {
 
           <SidebarFooter className="border-t p-4">
             <div className="mb-3 rounded-lg bg-primary/5 border p-3">
-              <p className="text-sm font-semibold text-sidebar-foreground">{user?.name || 'Demo Reinsurance Broker'}</p>
+              <p className="text-sm font-semibold text-sidebar-foreground">{user?.name || 'Demo Reinsurance Requester'}</p>
               <p className="truncate text-xs font-medium text-sidebar-foreground/80">
                 {user?.email || 'broker@reinsurance.local'}
               </p>
@@ -111,7 +111,7 @@ export function ReinsurerBrokerLayout() {
             <div className="flex w-full items-center gap-4 px-6">
               <SidebarTrigger className="hover:bg-muted/50" />
               <div className="flex-1">
-                <h1 className="text-xl font-bold text-foreground">Reinsurer Broker Portal</h1>
+                <h1 className="text-xl font-bold text-foreground">Reinsurance Requester Portal</h1>
                 <p className="text-sm text-muted-foreground">Manage facultative placements, referrals, and bound policies</p>
               </div>
               <div className="hidden items-center gap-2 rounded-full bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary sm:flex">

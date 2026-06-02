@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -18,13 +18,10 @@ import { PhoneInput } from "@/components/ui/phone-input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-import GeographicCoverage from "@/components/shared/GeographicCoverage";
-import { ArrowLeft, Building2, MapPin, Calendar, Upload, X, UserPlus, Eye, EyeOff } from "lucide-react";
-import { listMasterCountries, listMasterRegions, listMasterZones, type Country, type Region, type Zone } from '@/features/product-config/masters/api/masters';
+import { ArrowLeft, Building2, Calendar, Upload, X, UserPlus, Eye, EyeOff } from "lucide-react";
 import { useToast } from '@/shared/hooks/use-toast';
 import { createBrokerViaManagement, uploadBrokerFile, type CreateBrokerManagementRequest } from '@/features/brokers/api/brokers';
 import { useAuthStore } from '@/shared/stores/useAuthStore';
-import FormSkeleton from "@/components/loaders/FormSkeleton";
 import { formatFileSize } from '@/shared/utils/fileUtils';
 import { validatePhone } from "@/lib/phone/phone-validation";
 
@@ -45,10 +42,6 @@ const createBrokerSchema = z.object({
   licenseNumber: z.string().min(1, "License number is required"),
   validityStartDate: z.string().min(1, "Validity start date is required"),
   validityEndDate: z.string().min(1, "Validity end date is required"),
-  // Geographic coverage - mandatory
-  countries: z.array(z.string()).min(1, "At least one country is required"),
-  regions: z.array(z.string()).min(1, "At least one region is required"),
-  zones: z.array(z.string()).min(1, "At least one zone is required"),
 });
 
 type CreateBrokerForm = z.infer<typeof createBrokerSchema>;
@@ -58,15 +51,6 @@ const CreateBroker = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { user } = useAuthStore();
-  const [selectedCountries, setSelectedCountries] = useState<string[]>([]);
-  const [selectedRegions, setSelectedRegions] = useState<string[]>([]);
-  const [countries, setCountries] = useState<Country[]>([]);
-  const [allRegions, setAllRegions] = useState<Region[]>([]);
-  const [allZones, setAllZones] = useState<Zone[]>([]);
-  const [availableRegions, setAvailableRegions] = useState<Region[]>([]);
-  const [availableZones, setAvailableZones] = useState<Zone[]>([]);
-  const [mastersLoading, setMastersLoading] = useState<boolean>(true);
-  const [mastersError, setMastersError] = useState<string | null>(null);
   const [licenseFile, setLicenseFile] = useState<File | null>(null);
   const [licenseFileUrl, setLicenseFileUrl] = useState<string | null>(null);
   const [licenseFileId, setLicenseFileId] = useState<string | null>(null);
@@ -75,38 +59,6 @@ const CreateBroker = () => {
   const [logoFileUrl, setLogoFileUrl] = useState<string | null>(null);
   const [logoFileId, setLogoFileId] = useState<string | null>(null);
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
-
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      setMastersLoading(true);
-      setMastersError(null);
-      try {
-        const [c, r, z] = await Promise.all([
-          listMasterCountries(),
-          listMasterRegions(),
-          listMasterZones(),
-        ]);
-        if (!mounted) return;
-        setCountries(c);
-        setAllRegions(r);
-        setAllZones(z);
-      } catch (err: any) {
-        if (!mounted) return;
-        const status = err?.status;
-        const friendly =
-          status === 400 ? 'Invalid request while loading masters.' :
-            status === 401 ? 'Session expired. Please log in again.' :
-              status === 403 ? 'You are not authorized to load masters.' :
-                status === 500 ? 'Server error while fetching masters.' :
-                  err?.message || 'Failed to load masters.';
-        setMastersError(friendly);
-      } finally {
-        if (mounted) setMastersLoading(false);
-      }
-    })();
-    return () => { mounted = false; };
-  }, []);
 
   const form = useForm<CreateBrokerForm>({
     resolver: zodResolver(createBrokerSchema),
@@ -117,9 +69,6 @@ const CreateBroker = () => {
       licenseNumber: "",
       validityStartDate: "",
       validityEndDate: "",
-      countries: [],
-      regions: [],
-      zones: [],
       adminUserEmail: "",
       adminUserPassword: "",
     },
@@ -128,32 +77,6 @@ const CreateBroker = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
-
-  // Update available regions when countries change
-  const handleCountryChange = (countryIds: string[]) => {
-    setSelectedCountries(countryIds);
-    // Filter regions by parent countryId (not by region id)
-    const regions = allRegions.filter(r => countryIds.includes(r.countryId));
-    setAvailableRegions(regions);
-    // Reset regions and zones if no countries selected
-    if (countryIds.length === 0) {
-      form.setValue("regions", []);
-      form.setValue("zones", []);
-      setSelectedRegions([]);
-      setAvailableZones([]);
-    }
-  };
-
-  const handleRegionChange = (regionIds: string[]) => {
-    setSelectedRegions(regionIds);
-    const zones = allZones.filter(z => regionIds.includes(z.regionId));
-    setAvailableZones(zones);
-    form.setValue("regions", regionIds);
-    // Reset zones if no regions selected
-    if (regionIds.length === 0) {
-      form.setValue("zones", []);
-    }
-  };
 
   const onSubmit = async (values: CreateBrokerForm) => {
     setIsSubmitting(true);
@@ -171,68 +94,12 @@ const CreateBroker = () => {
         throw new Error('Market ID not found. Please ensure you are logged in as a market admin.');
       }
 
-      // Build operating coverage with correct structure
-      const operatingCountries = (values.countries || [])
-        .map(id => {
-          const c = countries.find(cn => cn.id === id);
-          if (!c) return null;
-          return {
-            id: c.id,
-            value: c.value,
-            label: c.label,
-            countryId: null,
-            active: c.active,
-          };
-        })
-        .filter((v): v is {
-          id: string; value: string; label: string; countryId: null; active: boolean;
-        } => Boolean(v));
-
-      const operatingRegions = (values.regions || [])
-        .map(id => {
-          const r = allRegions.find(reg => reg.id === id);
-          if (!r) return null;
-          return {
-            id: r.id,
-            value: r.value,
-            label: r.label,
-            countryId: r.countryId,
-            active: r.active,
-          };
-        })
-        .filter((v): v is {
-          id: string; value: string; label: string; countryId: string; active: boolean;
-        } => Boolean(v));
-
-      const operatingZones = (values.zones || [])
-        .map(id => {
-          const z = allZones.find(zn => zn.id === id);
-          if (!z) return null;
-          return {
-            id: z.id,
-            value: z.value,
-            label: z.label,
-            regionId: z.regionId,
-            active: z.active,
-          };
-        })
-        .filter((v): v is {
-          id: string; value: string; label: string; regionId: string; active: boolean;
-        } => Boolean(v));
-
-      // Hierarchical Validation for Geographic Coverage
-      // Validation is now handled by Zod schema
-
-
       const payload: CreateBrokerManagementRequest = {
         name: values.name,
         adminName: values.adminName,
         adminEmail: values.adminUserEmail,
         adminPassword: values.adminUserPassword,
         contactNumber: values.phone,
-        operatingCountries: operatingCountries.length ? operatingCountries : undefined,
-        operatingRegions: operatingRegions.length ? operatingRegions : undefined,
-        operatingZones: operatingZones.length ? operatingZones : undefined,
       };
 
       if (values.email) {
@@ -486,14 +353,8 @@ const CreateBroker = () => {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {mastersError && (
-                <div className="mb-2 p-3 rounded-md bg-destructive/10 text-destructive text-sm">{mastersError}</div>
-              )}
-              {mastersLoading ? (
-                <FormSkeleton pairs={6} />
-              ) : (
-                <Form {...form}>
-                  <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+              <Form {...form}>
+                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
                     {errorMessage && (
                       <div className="mb-2 p-3 rounded-md bg-destructive/10 text-destructive text-sm">{errorMessage}</div>
                     )}
@@ -829,30 +690,6 @@ const CreateBroker = () => {
                       </div>
                     </div>
 
-                    <GeographicCoverage
-                      required
-                      countries={countries}
-                      regions={allRegions}
-                      zones={allZones}
-                      selectedCountries={form.watch("countries") || []}
-                      selectedRegions={form.watch("regions") || []}
-                      selectedZones={form.watch("zones") || []}
-                      onCountriesChange={(ids) => {
-                        form.setValue("countries", ids, { shouldDirty: true, shouldValidate: true });
-                        handleCountryChange(ids);
-                      }}
-                      onRegionsChange={(ids) => {
-                        form.setValue("regions", ids, { shouldDirty: true, shouldValidate: true });
-                        handleRegionChange(ids);
-                      }}
-                      onZonesChange={(ids) => {
-                        form.setValue("zones", ids, { shouldDirty: true, shouldValidate: true });
-                      }}
-                      countriesError={form.formState.errors.countries?.message}
-                      regionsError={form.formState.errors.regions?.message}
-                      zonesError={form.formState.errors.zones?.message}
-                    />
-
                     <div className="flex gap-4 pt-6">
                       <Button type="button" variant="outline" onClick={handleBack}>
                         Cancel
@@ -863,7 +700,6 @@ const CreateBroker = () => {
                     </div>
                   </form>
                 </Form>
-              )}
             </CardContent>
           </Card>
         </div>

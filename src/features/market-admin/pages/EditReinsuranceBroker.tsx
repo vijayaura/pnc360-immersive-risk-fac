@@ -14,15 +14,19 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { ArrowLeft } from "lucide-react";
-import ReinsuranceBrokerForm, { type ReinsuranceBrokerFormData } from "@/features/reinsurance-brokers/components/ReinsuranceBrokerForm";
+import ReinsuranceBrokerForm, {
+  buildFacultativeTreatyPayload,
+  buildFacilityIntelligencePayload,
+  type ReinsuranceBrokerFormData,
+} from "@/features/reinsurance-brokers/components/ReinsuranceBrokerForm";
 import {
   getReinsuranceBroker,
   updateReinsuranceBroker,
   setReinsuranceBrokerStatus,
   type UpdateReinsuranceBrokerRequest,
+  type BrokerFacultativeTreatyConfig,
+  type BrokerFacilityIntelligence,
 } from "@/features/reinsurance-brokers/api/reinsurance-brokers";
-import { listMasterCountries, listMasterRegions, listMasterZones } from "@/features/product-config/masters/api/masters";
-import type { Country, Region, Zone } from "@/features/product-config/masters/api/masters";
 import { useToast } from "@/shared/hooks/use-toast";
 import FormSkeleton from "@/components/loaders/FormSkeleton";
 
@@ -32,7 +36,14 @@ const EditReinsuranceBroker = () => {
   const { toast } = useToast();
 
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [brokerData, setBrokerData] = useState<any>(null);
+  const [brokerData, setBrokerData] = useState<
+    Partial<ReinsuranceBrokerFormData & {
+      id?: string;
+      status?: string;
+      facultativeTreaty?: BrokerFacultativeTreatyConfig;
+      facilityIntelligence?: BrokerFacilityIntelligence;
+    }> | null
+  >(null);
   const [isDirect, setIsDirect] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -43,35 +54,13 @@ const EditReinsuranceBroker = () => {
   const [pendingStatus, setPendingStatus] = useState<boolean | null>(null);
   const [statusChanging, setStatusChanging] = useState(false);
 
-  const [masterCountries, setMasterCountries] = useState<Country[]>([]);
-  const [masterRegions, setMasterRegions] = useState<Region[]>([]);
-  const [masterZones, setMasterZones] = useState<Zone[]>([]);
-
   useEffect(() => {
     if (!id) return;
     const load = async () => {
       setIsLoading(true);
       setLoadError(null);
       try {
-        const [c, r, z, data] = await Promise.all([
-          listMasterCountries(),
-          listMasterRegions(),
-          listMasterZones(),
-          getReinsuranceBroker(id),
-        ]);
-        setMasterCountries(c);
-        setMasterRegions(r);
-        setMasterZones(z);
-
-        const countryIds = (data.geoCoverage?.countries || [])
-          .map((c) => c.id)
-          .filter((v): v is string => Boolean(v));
-        const regionIds = (data.geoCoverage?.regions || [])
-          .map((r) => r.id)
-          .filter((v): v is string => Boolean(v));
-        const zoneIds = (data.geoCoverage?.zones || [])
-          .map((z) => z.id)
-          .filter((v): v is string => Boolean(v));
+        const data = await getReinsuranceBroker(id);
 
         setIsDirect(data.isDirect ?? false);
 
@@ -83,12 +72,11 @@ const EditReinsuranceBroker = () => {
           phone: data.phone || "",
           address: data.address || "",
           isDirect: data.isDirect ?? false,
-          countries: countryIds,
-          regions: regionIds,
-          zones: zoneIds,
           adminUserName: data.adminName || "",
           adminUserEmail: data.adminEmail || "",
           status: data.status,
+          facultativeTreaty: data.facultativeTreaty,
+          facilityIntelligence: data.facilityIntelligence,
         });
         setIsActive(data.status?.toLowerCase() !== "inactive");
       } catch (err: any) {
@@ -108,18 +96,6 @@ const EditReinsuranceBroker = () => {
     try {
       if (!id) throw new Error("Missing broker id");
 
-      const selectedCountryObjects = (formData.countries || [])
-        .map((cId) => masterCountries.find((c) => c.id === cId))
-        .filter((v): v is (typeof masterCountries)[number] => Boolean(v));
-
-      const selectedRegionObjects = (formData.regions || [])
-        .map((rId) => masterRegions.find((r) => r.id === rId))
-        .filter((v): v is (typeof masterRegions)[number] => Boolean(v));
-
-      const selectedZoneObjects = (formData.zones || [])
-        .map((zId) => masterZones.find((z) => z.id === zId))
-        .filter((v): v is (typeof masterZones)[number] => Boolean(v));
-
       const payload: UpdateReinsuranceBrokerRequest = {
         name: formData.name,
         licenseNumber: formData.licenseNumber || undefined,
@@ -127,28 +103,10 @@ const EditReinsuranceBroker = () => {
         phone: formData.phone,
         address: formData.address,
         isDirect: formData.isDirect ?? false,
-        operatingCountries: selectedCountryObjects.map((c) => ({
-          id: c.id,
-          value: c.value,
-          label: c.label,
-          active: true,
-        })),
-        operatingRegions: selectedRegionObjects.map((r) => ({
-          id: r.id,
-          value: r.value,
-          label: r.label,
-          countryId: r.countryId,
-          active: true,
-        })),
-        operatingZones: selectedZoneObjects.map((z) => ({
-          id: z.id,
-          value: z.value,
-          label: z.label,
-          regionId: z.regionId,
-          active: true,
-        })),
         adminEmail: formData.adminUserEmail,
         adminName: formData.adminUserName,
+        facultativeTreaty: buildFacultativeTreatyPayload(formData),
+        facilityIntelligence: buildFacilityIntelligencePayload(formData),
       };
 
       await updateReinsuranceBroker(id, payload);

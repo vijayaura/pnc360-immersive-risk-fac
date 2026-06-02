@@ -539,7 +539,7 @@ const CustomerTemplateManagement = () => {
           <div className="w-full">
             <div className="mb-6 flex items-center justify-between">
               <div>
-                <h1 className="text-3xl font-bold text-foreground">Template Management</h1>
+                <h1 className="text-3xl font-bold text-foreground">Templates</h1>
                 <p className="mt-1 text-muted-foreground">
                   Manage customer templates and reusable general templates.
                 </p>

@@ -109,6 +109,26 @@ export default {
 				'bounce-subtle': {
 					'0%, 100%': { transform: 'translateY(0)' },
 					'50%': { transform: 'translateY(-2px)' }
+				},
+				'weather-float': {
+					'0%, 100%': { transform: 'translateY(0)' },
+					'50%': { transform: 'translateY(-4px)' }
+				},
+				'weather-sway': {
+					'0%, 100%': { transform: 'rotate(-8deg)' },
+					'50%': { transform: 'rotate(8deg)' }
+				},
+				'weather-pulse-soft': {
+					'0%, 100%': { opacity: '1', transform: 'scale(1)' },
+					'50%': { opacity: '0.88', transform: 'scale(1.07)' }
+				},
+				'weather-rain-drip': {
+					'0%, 100%': { transform: 'translateY(0)' },
+					'50%': { transform: 'translateY(3px)' }
+				},
+				'card-enter': {
+					'0%': { opacity: '0', transform: 'translateY(14px) scale(0.98)' },
+					'100%': { opacity: '1', transform: 'translateY(0) scale(1)' }
 				}
 			},
 			animation: {
@@ -117,7 +137,12 @@ export default {
 				'fade-in': 'fade-in 0.4s ease-out',
 				'slide-in-right': 'slide-in-right 0.3s ease-out',
 				'scale-in': 'scale-in 0.3s ease-out',
-				'bounce-subtle': 'bounce-subtle 2s ease-in-out infinite'
+				'bounce-subtle': 'bounce-subtle 2s ease-in-out infinite',
+				'weather-float': 'weather-float 2.8s ease-in-out infinite',
+				'weather-sway': 'weather-sway 1.6s ease-in-out infinite',
+				'weather-pulse-soft': 'weather-pulse-soft 2s ease-in-out infinite',
+				'weather-rain-drip': 'weather-rain-drip 1.8s ease-in-out infinite',
+				'card-enter': 'card-enter 0.55s cubic-bezier(0.22, 1, 0.36, 1) both'
 			},
 			backgroundImage: {
 				'gradient-primary': 'var(--gradient-primary)',

@@ -1,21 +1,24 @@
-import { type ChangeEvent, useEffect, useRef, useState } from 'react';
+import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
+  ArrowRight,
   Brain,
-  CheckCircle,
   CheckCircle2,
   ChevronDown,
+  Circle,
   ClipboardList,
-  Download,
   Eye,
   FileText,
-  MessageSquare,
+  Info,
+  Loader2,
   Pencil,
   Plus,
   Save,
-  Send,
   Upload,
+  Download,
+  MessageSquare,
+  Send,
   User,
   X,
 } from 'lucide-react';
@@ -27,6 +30,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Dialog,
   DialogContent,
@@ -41,11 +45,64 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/shared/hooks/use-toast';
 import { cn } from '@/shared/utils/lib-utils';
+import { buildFacultativeReinsuranceSlipDocxBlob } from '@/features/referrals/utils/facultativeReinsuranceSlipDocx';
 import { facultativeReferrals } from '@/features/reinsurer-brokers/data/mockData';
 import { FacInwardRequestJourney } from '@/features/reinsurer-brokers/components/FacInwardRequestJourney';
+import {
+  ArrangeFacultativeReinsuranceDialog,
+  type FacultativeArrangeDraft,
+} from '@/features/referrals/components/ArrangeFacultativeReinsuranceDialog';
+import { listReinsurers, type Reinsurer } from '@/features/reinsurers/api/reinsurers';
+import {
+  computeFacInwardJourneyCompleted,
+  FAC_INWARD_JOURNEY_STEPS,
+  facInwardStepTimestamp,
+  formatFacInwardBritishDateTime,
+  getFirstIncompleteSlipStepIndex,
+} from '@/features/reinsurer-brokers/model/facInwardJourneyShared';
 
 const fmtAED = (value: number) =>
   `${new Intl.NumberFormat('en-AE', { maximumFractionDigits: 0 }).format(value)} AED`;
+
+/** Party context per journey step — aligns with `FAC_INWARD_JOURNEY_STEPS` order. */
+const FAC_SLIP_EXCHANGE_ROLES = [
+  'Cedent / broker issued',
+  'Reinsurer quoted',
+  'Broker circulated placement',
+  'Cedent signed & returned',
+] as const;
+
+/** Labels for slip-sequence row actions — aligned with `FAC_INWARD_JOURNEY_STEPS` `fileSlug`s. */
+function getSlipStepButtonCopy(step: (typeof FAC_INWARD_JOURNEY_STEPS)[number]) {
+  switch (step.fileSlug) {
+    case 'fac-request-slip':
+      return {
+        generate: 'Request slip',
+        upload: 'Upload request slip',
+        action: 'Send request slip',
+      };
+    case 'quote-slip':
+      return {
+        generate: 'Quote slip',
+        upload: 'Upload quote slip',
+        action: 'Send quote slip',
+      };
+    case 'placement-slip':
+      return {
+        generate: 'Placement slip',
+        upload: 'Upload placement slip',
+        action: 'Send placement slip',
+      };
+    case 'signed-placement-slip':
+      return {
+        generate: 'Signed slip',
+        upload: 'Upload signed slip',
+        action: 'Send signed slip',
+      };
+    default:
+      return { generate: 'Slip', upload: 'Upload slip', action: 'Send slip' };
+  }
+}
 
 type ReferralRecord = (typeof facultativeReferrals)[number];
 
@@ -91,7 +148,6 @@ const DEFAULT_PLACEMENT_CEWS: PlacementCewItem[] = [
 
 const requirementSummary = [
   ['Sum Insured', fmtAED(78000000)],
-  ['Gross Premium', fmtAED(1380000)],
   ['Insurer Retention', fmtAED(26000000)],
   ['Cession Help Required', fmtAED(52000000)],
   ['Commission %', '12.5%'],
@@ -280,17 +336,6 @@ function requirementSummaryAiInsight(summaryLabel: string): RequirementSummaryAi
       acceptableRange: '72M – 84M AED (PAR terminal, CAT-exposed cohort)',
     };
   }
-  if (lbl.includes('gross premium')) {
-    return {
-      score: 61,
-      tier: 'amber',
-      pointers: [
-        '≈1.77‰ on SI vs market 1.5–2.2‰ for heavy industrial',
-        'Layer pricing soft vs regional CAT peers — watch net rate',
-      ],
-      acceptableRange: '1.22M – 1.55M AED (model band at quoted SI / exposure)',
-    };
-  }
   if (lbl.includes('retention')) {
     return {
       score: 48,
@@ -401,6 +446,8 @@ const reinsurerRequestStatuses = [
     name: 'Demo Reinsurer',
     status: 'Quoted',
     cessionPercent: '60%',
+    premiumAED: 828000,
+    commissionAED: 103500,
     premium: fmtAED(828000),
     commission: fmtAED(103500),
     lastUpdate: '07/05/2026, 10:30',
@@ -410,6 +457,8 @@ const reinsurerRequestStatuses = [
     name: 'Falcon Re',
     status: 'Pending Review',
     cessionPercent: '25%',
+    premiumAED: 345000,
+    commissionAED: 43125,
     premium: fmtAED(345000),
     commission: fmtAED(43125),
     lastUpdate: '07/05/2026, 10:18',
@@ -419,6 +468,8 @@ const reinsurerRequestStatuses = [
     name: 'Global Re',
     status: 'Declined',
     cessionPercent: '15%',
+    premiumAED: 207000,
+    commissionAED: 25875,
     premium: fmtAED(207000),
     commission: fmtAED(25875),
     lastUpdate: '07/05/2026, 11:05',
@@ -508,23 +559,38 @@ const timelineReinsurerPerspective: [string, string, string][] = [
   ],
 ];
 
+type PlacementEditBaseline = {
+  sharePercent: string;
+  risk: string;
+  premium: string;
+  commissionPercent: string;
+};
+
+type PlacementFieldChange = {
+  label: string;
+  before: string;
+  after: string;
+};
+
 type PlacementEditHistoryRow = {
   date: string;
   updatedBy: string;
   summary: string;
   comment: string;
+  /** When set, replaces summary for display of previous vs current placement figures. */
+  fieldChanges?: readonly PlacementFieldChange[];
 };
 
 const placementEditHistoryBrokerInitial: PlacementEditHistoryRow[] = [
   {
     date: '06/05/2026, 15:30:22',
-    updatedBy: 'Demo Reinsurance Broker',
+    updatedBy: 'Demo Reinsurance Requester',
     summary: 'Placement slip submitted to reinsurer',
     comment: 'Initial request shared with target reinsurer for capacity confirmation.',
   },
   {
     date: '06/05/2026, 14:48:10',
-    updatedBy: 'Demo Reinsurance Broker',
+    updatedBy: 'Demo Reinsurance Requester',
     summary: 'Quote form attached',
     comment: 'Broker quote form validated and risk values extracted.',
   },
@@ -564,11 +630,75 @@ const placementEditHistoryReinsurerInitial: PlacementEditHistoryRow[] = [
   },
 ];
 
+/** Shared Edit History table for facultative placement (underwriter + broker layouts). */
+function PlacementEditHistoryTable({
+  history,
+  headerClassName,
+  wrapClassName,
+}: {
+  history: PlacementEditHistoryRow[];
+  headerClassName: string;
+  wrapClassName: string;
+}) {
+  return (
+    <div className={wrapClassName}>
+      <div className={headerClassName}>Edit History</div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[52rem] text-sm">
+          <thead className="text-left text-xs uppercase tracking-wide text-muted-foreground">
+            <tr>
+              <th className="px-4 py-3">Date</th>
+              <th className="px-4 py-3">Updated By</th>
+              <th className="px-4 py-3">Summary</th>
+              <th className="min-w-[14rem] px-4 py-3">Previous → current</th>
+              <th className="px-4 py-3">Comment</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {history.map((item, index) => (
+              <tr key={`${item.date}-${item.updatedBy}-${index}`}>
+                <td className="px-4 py-3 whitespace-nowrap align-top text-muted-foreground">{item.date}</td>
+                <td className="px-4 py-3 align-top">{item.updatedBy}</td>
+                <td className="px-4 py-3 align-top font-semibold">{item.summary}</td>
+                <td className="px-4 py-3 align-top">
+                  {item.fieldChanges && item.fieldChanges.length > 0 ? (
+                    <ul className="space-y-2 text-xs leading-snug">
+                      {item.fieldChanges.map((ch) => (
+                        <li key={ch.label}>
+                          <div className="font-medium text-foreground">{ch.label}</div>
+                          <div className="mt-0.5 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 tabular-nums">
+                            <span className="text-muted-foreground line-through decoration-muted-foreground/40">
+                              {ch.before}
+                            </span>
+                            <span className="text-muted-foreground" aria-hidden>
+                              →
+                            </span>
+                            <span className="font-semibold text-foreground">{ch.after}</span>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </td>
+                <td className="px-4 py-3 align-top text-muted-foreground">{item.comment}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function ReinsurerBrokerRequestDetails({
   portal = 'broker',
   pathOverrides,
   requesterChatRole = 'broker',
   submissionSourceLabel,
+  /** Reinsurer-broker referral routes: same shell as insurer fac-in-cases (journey, summary, tabs). */
+  embedInwardFacLayout = false,
 }: {
   portal?: RequestDetailsPortal;
   pathOverrides?: ReinsurerBrokerPathOverrides;
@@ -576,27 +706,45 @@ export default function ReinsurerBrokerRequestDetails({
   requesterChatRole?: 'broker' | 'insurer';
   /** Overrides quote info "Submission Source" (e.g. insurer referral reinsurance page). */
   submissionSourceLabel?: string;
+  embedInwardFacLayout?: boolean;
 }) {
   const { toast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
+  const locationState = location.state as { record?: ReferralRecord; returnTo?: string } | null;
+  const navigateReturnTo = locationState?.returnTo;
   const defaultedPaths = portalPaths(portal);
   const referralBase = pathOverrides?.referralBase ?? defaultedPaths.referralBase;
   const dashboardPath = pathOverrides?.dashboard ?? defaultedPaths.dashboard;
   const backFromReinsurerDetailPath = pathOverrides?.backFromReinsurerDetail;
   const { recordId, reinsurerId } = useParams<{ recordId: string; reinsurerId?: string }>();
-  const record = ((location.state as { record?: ReferralRecord } | null)?.record
+  const record = (locationState?.record
     ?? facultativeReferrals.find((item) => item.id === recordId)
     ?? fallbackRecord);
   const isReinsurerDetailPage = Boolean(reinsurerId);
-  /** Broker portal: reinsurer picker; inward fac portals: omit list and embed reinsurer panels. */
+  /** Insurer / reinsurer / broker referral inward: full fac-in request shell. */
+  const showInwardFacShell = inwardFacPortal(portal) || embedInwardFacLayout;
+  /** Broker-only reinsurer line picker (list route is never embed inward). */
   const showReinsurerRequestsList = portal === 'broker' && !isReinsurerDetailPage;
+  /** Detail panels / journey: per-reinsurer or insurer/reinsurer inward portals (not embed on list-only route). */
   const showReinsurerDetailPanels = isReinsurerDetailPage || inwardFacPortal(portal);
+  /** Broker referral inward: CEWs on placement are display-only (matches controlled placement handoff). */
+  const brokerReferralPlacementCewReadOnly = embedInwardFacLayout;
+  /** Broker placing outward fac to reinsurers: same layout shell as inward demo, without AI / immersive header. */
+  const isBrokerFacOutwardDetail = portal === 'broker' && embedInwardFacLayout && isReinsurerDetailPage;
+  /** Show “Attached documents” on summary header (inward list + broker outward journey detail). Reinsurer line detail otherwise hides it. */
+  const showAttachedDocumentsInSummary = !isReinsurerDetailPage || isBrokerFacOutwardDetail;
+  /** Facultative inward request details: insurer/reinsurer fac-in pages + insurer referral fac line (not broker outward placement or broker referral list). */
+  const showFacInwardReinsuranceChat =
+    (inwardFacPortal(portal) && showReinsurerDetailPanels) ||
+    (Boolean(pathOverrides) && embedInwardFacLayout && isReinsurerDetailPage);
 
-  const [isCommunicationOpen, setIsCommunicationOpen] = useState(false);
   const [insurerDocumentsDialogOpen, setInsurerDocumentsDialogOpen] = useState(false);
+  const [facSlipDocDownloading, setFacSlipDocDownloading] = useState(false);
   const [aiRiskSuggestionsEnabled, setAiRiskSuggestionsEnabled] = useState(false);
-  const signedFacSlipInputRef = useRef<HTMLInputElement>(null);
+  const [brokerArrangeFacDraft, setBrokerArrangeFacDraft] = useState<FacultativeArrangeDraft | null>(null);
+  const [brokerFacReinsurers, setBrokerFacReinsurers] = useState<Reinsurer[]>([]);
+  const [reinsuranceChatOpen, setReinsuranceChatOpen] = useState(false);
 
   const [placementCewItems, setPlacementCewItems] = useState<PlacementCewItem[]>(() =>
     DEFAULT_PLACEMENT_CEWS.map((item) => ({ ...item })),
@@ -612,6 +760,54 @@ export default function ReinsurerBrokerRequestDetails({
   const [newCewDetail, setNewCewDetail] = useState('');
   const [signedFacSlipName, setSignedFacSlipName] = useState<string | null>(null);
   const [placementFinalised, setPlacementFinalised] = useState(false);
+  /** Demo: user-attached file name per journey step (earlier steps); signed step uses `signedFacSlipName` when set. */
+  const [slipUploadByStep, setSlipUploadByStep] = useState<Record<number, string>>({});
+  /** Demo: system draft filename per step (download slip button). */
+  const [generatedSlipByStep, setGeneratedSlipByStep] = useState<Record<number, string>>({});
+  const slipUploadStepRef = useRef<number | null>(null);
+  const slipFileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    listReinsurers({ limit: 200, status: 'ACTIVE' })
+      .then((res) => setBrokerFacReinsurers(res.data ?? []))
+      .catch(() => {});
+  }, []);
+
+  const facJourneyCompleted = useMemo(
+    () => computeFacInwardJourneyCompleted(record.status, placementFinalised, signedFacSlipName),
+    [record.status, placementFinalised, signedFacSlipName],
+  );
+
+  /** Broker referral list: aggregates across reinsurer lines (excludes declined shares for ceded SI). */
+  const brokerReferralOverviewMetrics = useMemo(() => {
+    const parseCessionPct = (value: string) => {
+      const n = Number(String(value).replace(/%/g, ''));
+      return Number.isFinite(n) ? n / 100 : 0;
+    };
+    let cededSi = 0;
+    let commissionSum = 0;
+    for (const line of reinsurerRequestStatuses) {
+      if (line.status === 'Declined') continue;
+      cededSi += record.requestedCededSI * parseCessionPct(line.cessionPercent);
+      commissionSum += line.commissionAED;
+    }
+    const cededSiRounded = Math.round(cededSi);
+    return {
+      requestedCessionSi: record.requestedCededSI,
+      cededSi: cededSiRounded,
+      cededSiYetToBePlaced: Math.max(0, record.requestedCededSI - cededSiRounded),
+      premium: record.premium,
+      commission: commissionSum,
+    };
+  }, [record.requestedCededSI, record.premium, reinsurerRequestStatuses]);
+
+  const brokerFacArrangeRetentionAvailable = useMemo(
+    () =>
+      brokerReferralOverviewMetrics.cededSiYetToBePlaced > 0
+        ? brokerReferralOverviewMetrics.cededSiYetToBePlaced
+        : record.requestedCededSI,
+    [brokerReferralOverviewMetrics.cededSiYetToBePlaced, record.requestedCededSI],
+  );
 
   const [selectedReinsurerId] = useState(reinsurerId ?? 'demo-reinsurer');
   const [isEditingPlacement, setIsEditingPlacement] = useState(false);
@@ -622,8 +818,10 @@ export default function ReinsurerBrokerRequestDetails({
     commissionPercent: '12.5',
     comment: '',
   });
+  const placementEditBaselineRef = useRef<PlacementEditBaseline | null>(null);
   const [history, setHistory] = useState<PlacementEditHistoryRow[]>(() => {
-    if (inwardFacPortal(portal)) return placementEditHistoryReinsurerInitial;
+    if (isBrokerFacOutwardDetail) return placementEditHistoryBrokerInitial;
+    if (inwardFacPortal(portal) || embedInwardFacLayout) return placementEditHistoryReinsurerInitial;
     if (requesterChatRole === 'insurer') return placementEditHistoryInsurerReferrerInitial;
     return placementEditHistoryBrokerInitial;
   });
@@ -633,7 +831,7 @@ export default function ReinsurerBrokerRequestDetails({
     ['Risk ID', record.riskId],
     ['Insured', record.insured],
     ['Product', record.product],
-    ['Submission Source', submissionSourceLabel ?? 'Reinsurer Broker Portal'],
+    ['Submission Source', submissionSourceLabel ?? 'Reinsurance Requester Portal'],
     ['Originating Insurer', 'Aura Underwriting Demo'],
     ['Target Reinsurer', reinsurerRequestStatuses.find((item) => item.id === selectedReinsurerId)?.name ?? record.reinsurer],
     ['Submitted Date', record.submittedDate],
@@ -663,7 +861,7 @@ export default function ReinsurerBrokerRequestDetails({
       rows: [
         ['Target Reinsurer', reinsurerRequestStatuses.find((item) => item.id === selectedReinsurerId)?.name ?? record.reinsurer],
         ['Originating Insurer', 'Aura Underwriting Demo'],
-        ['Submission Source', submissionSourceLabel ?? 'Reinsurer Broker Portal'],
+        ['Submission Source', submissionSourceLabel ?? 'Reinsurance Requester Portal'],
       ],
     },
     {
@@ -676,8 +874,9 @@ export default function ReinsurerBrokerRequestDetails({
     },
   ];
 
-  const timeline =
-    inwardFacPortal(portal)
+  const timeline = isBrokerFacOutwardDetail
+    ? timelineBrokerPerspective
+    : inwardFacPortal(portal) || embedInwardFacLayout
       ? timelineReinsurerPerspective
       : requesterChatRole === 'insurer'
         ? timelineInsurerRequesterPerspective
@@ -685,11 +884,12 @@ export default function ReinsurerBrokerRequestDetails({
 
   useEffect(() => {
     setHistory(() => {
-      if (inwardFacPortal(portal)) return placementEditHistoryReinsurerInitial;
+      if (isBrokerFacOutwardDetail) return placementEditHistoryBrokerInitial;
+      if (inwardFacPortal(portal) || embedInwardFacLayout) return placementEditHistoryReinsurerInitial;
       if (requesterChatRole === 'insurer') return placementEditHistoryInsurerReferrerInitial;
       return placementEditHistoryBrokerInitial;
     });
-  }, [portal, record.id, reinsurerId, requesterChatRole]);
+  }, [portal, record.id, reinsurerId, requesterChatRole, embedInwardFacLayout, isBrokerFacOutwardDetail]);
 
   useEffect(() => {
     setPlacement({
@@ -699,11 +899,85 @@ export default function ReinsurerBrokerRequestDetails({
       commissionPercent: '12.5',
       comment: '',
     });
+    placementEditBaselineRef.current = null;
+    setIsEditingPlacement(false);
   }, [record.id, record.requestedCededSI, record.premium]);
+
+  const facultativeSlipDownloadContext = useMemo(
+    () => ({
+      referral: undefined,
+      referralId: record.requestId,
+      productName: record.product,
+      sumInsured: 78_000_000,
+      cededSumInsured: (() => {
+        let ceded = record.requestedCededSI;
+        if (isBrokerFacOutwardDetail) {
+          const pr = Number(placement.risk);
+          if (Number.isFinite(pr) && pr > 0) ceded = Math.round(pr);
+        }
+        return ceded;
+      })(),
+      grossPremium: (() => {
+        let prem = record.premium;
+        if (isBrokerFacOutwardDetail) {
+          const pp = Number(placement.premium);
+          if (Number.isFinite(pp) && pp > 0) prem = Math.round(pp);
+        }
+        return prem;
+      })(),
+      currency: 'AED',
+      selectedParties: [
+        {
+          kind: 'reinsurer' as const,
+          id: selectedReinsurerId,
+          name:
+            reinsurerRequestStatuses.find((item) => item.id === selectedReinsurerId)?.name ?? record.reinsurer,
+        },
+      ],
+      insuredDisplayName: record.insured,
+      locationDisplayName: record.insured,
+      periodStartIso: `${record.submittedDate}T12:00:00`,
+    }),
+    [
+      record.requestId,
+      record.product,
+      record.requestedCededSI,
+      record.premium,
+      record.insured,
+      record.submittedDate,
+      record.reinsurer,
+      selectedReinsurerId,
+      isBrokerFacOutwardDetail,
+      placement.risk,
+      placement.premium,
+    ],
+  );
+
+  const handleDownloadFacRequestSlipDocx = useCallback(async () => {
+    setFacSlipDocDownloading(true);
+    try {
+      const blob = await buildFacultativeReinsuranceSlipDocxBlob(facultativeSlipDownloadContext);
+      const safeRef = record.requestId.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Facultative_Reinsurance_Slip_${safeRef}.docx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      toast({ title: 'Download started', description: 'Facultative request slip (.docx).' });
+    } catch {
+      toast({ title: 'Download failed', description: 'Could not generate the slip.', variant: 'destructive' });
+    } finally {
+      setFacSlipDocDownloading(false);
+    }
+  }, [facultativeSlipDownloadContext, record.requestId, toast]);
 
   useEffect(() => {
     setPlacementCewItems(DEFAULT_PLACEMENT_CEWS.map((item) => ({ ...item })));
     setIncludedCewIds(new Set(DEFAULT_PLACEMENT_CEWS.map((item) => item.id)));
+    setGeneratedSlipByStep({});
   }, [record.id]);
 
   const handleShareChange = (value: string) => {
@@ -723,15 +997,61 @@ export default function ReinsurerBrokerRequestDetails({
     });
   };
 
-  const handleSignedFacSlipChange = (event: ChangeEvent<HTMLInputElement>) => {
+  const signedPlacementStepIndex = FAC_INWARD_JOURNEY_STEPS.length - 1;
+
+  const openSlipStepUpload = (stepIndex: number) => {
+    slipUploadStepRef.current = stepIndex;
+    slipFileInputRef.current?.click();
+  };
+
+  const handleSlipSequenceFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file) return;
-    setSignedFacSlipName(file.name);
-    toast({
-      title: 'Signed Placement slip',
-      description: `${file.name} uploaded successfully (demo).`,
-    });
+    const stepIndex = slipUploadStepRef.current;
     event.target.value = '';
+    slipUploadStepRef.current = null;
+    if (!file || stepIndex === null) return;
+
+    if (stepIndex === signedPlacementStepIndex) {
+      setSignedFacSlipName(file.name);
+    } else {
+      setSlipUploadByStep((prev) => ({ ...prev, [stepIndex]: file.name }));
+    }
+    toast({
+      title: FAC_INWARD_JOURNEY_STEPS[stepIndex]?.label ?? 'Slip',
+      description: `${file.name} attached (demo).`,
+    });
+  };
+
+  const handleGenerateSlipForStep = (stepIndex: number) => {
+    const step = FAC_INWARD_JOURNEY_STEPS[stepIndex];
+    const safeReq = record.requestId.replace(/[^a-zA-Z0-9-_]/g, '_');
+    const name = `${step.fileSlug}-generated-${safeReq}.pdf`;
+    setGeneratedSlipByStep((prev) => ({ ...prev, [stepIndex]: name }));
+    toast({
+      title: 'Slip draft ready',
+      description: `${step.label}: ${name} (demo — production would create the document).`,
+    });
+  };
+
+  const handleSlipStepWorkflowAction = (stepIndex: number) => {
+    const step = FAC_INWARD_JOURNEY_STEPS[stepIndex];
+    const copy = getSlipStepButtonCopy(step);
+    const safeReq = record.requestId.replace(/[^a-zA-Z0-9-_]/g, '_');
+    const demoFallback = `${step.fileSlug}-${safeReq}.pdf`;
+    const displayName =
+      stepIndex === signedPlacementStepIndex && signedFacSlipName
+        ? signedFacSlipName
+        : slipUploadByStep[stepIndex] ??
+          generatedSlipByStep[stepIndex] ??
+          (facJourneyCompleted[stepIndex] ? demoFallback : null);
+    if (displayName) {
+      openDocumentDemo(displayName, copy.action);
+      return;
+    }
+    toast({
+      title: copy.action,
+      description: `Add a slip for ${step.label} using download or upload, then run this action (demo).`,
+    });
   };
 
   const resetAddCewForm = () => {
@@ -770,11 +1090,12 @@ export default function ReinsurerBrokerRequestDetails({
 
   const handleFinalisePlacement = () => {
     if (placementFinalised) return;
-    if (!signedFacSlipName) {
+    if (!facJourneyCompleted[2]) {
       toast({
         variant: 'destructive',
-        title: 'Signed slip required',
-        description: 'Upload the signed placement slip before finalising placement.',
+        title: 'Placement slip not in channel',
+        description:
+          'The placement slip must be shared in the workflow before you can finalise this inward placement.',
       });
       return;
     }
@@ -785,24 +1106,14 @@ export default function ReinsurerBrokerRequestDetails({
     });
   };
 
-  const handleDownloadFacPlacementSlip = () => {
-    const slip = [
-      'Facultative Placement Slip',
-      `Request ID: ${record.requestId}`,
-      `Risk ID: ${record.riskId}`,
-      `Insured: ${record.insured}`,
-      `Product: ${record.product}`,
-      `Requested Ceded SI: ${fmtAED(record.requestedCededSI)}`,
-      `Premium: ${fmtAED(record.premium)}`,
-      `Commission %: ${placement.commissionPercent}%`,
-    ].join('\n');
-    const blob = new Blob([slip], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `placement-slip-${record.requestId.replace(/[^a-zA-Z0-9-_]/g, '_')}.txt`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+  const beginPlacementEdit = () => {
+    placementEditBaselineRef.current = {
+      sharePercent: placement.sharePercent,
+      risk: placement.risk,
+      premium: placement.premium,
+      commissionPercent: placement.commissionPercent,
+    };
+    setIsEditingPlacement(true);
   };
 
   const handleSavePlacement = () => {
@@ -815,6 +1126,52 @@ export default function ReinsurerBrokerRequestDetails({
       second: '2-digit',
       hour12: false,
     });
+    const baseline = placementEditBaselineRef.current;
+    placementEditBaselineRef.current = null;
+
+    const fieldChanges: PlacementFieldChange[] = [];
+    if (baseline) {
+      if (baseline.sharePercent !== placement.sharePercent) {
+        fieldChanges.push({
+          label: 'Requested share %',
+          before: `${baseline.sharePercent}%`,
+          after: `${placement.sharePercent}%`,
+        });
+      }
+      if (baseline.risk !== placement.risk) {
+        fieldChanges.push({
+          label: inwardFacPortal(portal) ? 'Placed risk (ceded line)' : 'Broker placed risk',
+          before: fmtAED(Number(baseline.risk) || 0),
+          after: fmtAED(Number(placement.risk) || 0),
+        });
+      }
+      if (baseline.premium !== placement.premium) {
+        fieldChanges.push({
+          label: 'Premium',
+          before: fmtAED(Number(baseline.premium) || 0),
+          after: fmtAED(Number(placement.premium) || 0),
+        });
+      }
+      if (baseline.commissionPercent !== placement.commissionPercent) {
+        fieldChanges.push({
+          label: 'Commission %',
+          before: `${baseline.commissionPercent}%`,
+          after: `${placement.commissionPercent}%`,
+        });
+      }
+    }
+
+    const defaultComment = inwardFacPortal(portal)
+      ? 'Recorded updated facultative line and commission after internal underwriting review.'
+      : requesterChatRole === 'insurer'
+        ? 'Updated placement terms recorded from underwriting.'
+        : 'Updated broker placement terms.';
+
+    const summary =
+      fieldChanges.length > 0
+        ? `Placement updated · ${fieldChanges.length} figure${fieldChanges.length === 1 ? '' : 's'} changed`
+        : 'Placement saved · no figure changes';
+
     setHistory((prev) => [
       {
         date: now,
@@ -822,15 +1179,10 @@ export default function ReinsurerBrokerRequestDetails({
           ? 'Demo Reinsurer'
           : requesterChatRole === 'insurer'
             ? 'Demo Underwriter'
-            : 'Demo Reinsurance Broker',
-        summary: `Share ${placement.sharePercent}%, commission ${placement.commissionPercent}%`,
-        comment:
-          placement.comment.trim() ||
-          (inwardFacPortal(portal)
-            ? 'Recorded updated facultative line and commission after internal underwriting review.'
-            : requesterChatRole === 'insurer'
-              ? 'Updated placement terms recorded from underwriting.'
-              : 'Updated broker placement terms.'),
+            : 'Demo Reinsurance Requester',
+        summary,
+        comment: placement.comment.trim() || defaultComment,
+        fieldChanges: fieldChanges.length > 0 ? fieldChanges : undefined,
       },
       ...prev,
     ]);
@@ -838,54 +1190,150 @@ export default function ReinsurerBrokerRequestDetails({
     setIsEditingPlacement(false);
   };
 
-  const signedPlacementSlipSection = (
+  const firstIncompleteSlipStepIndex = getFirstIncompleteSlipStepIndex(facJourneyCompleted);
+
+  const slipExchangeSection = (
     <section
-      aria-labelledby="signed-placement-slip-heading"
-      className="rounded-xl border border-primary/30 bg-primary/[0.06] p-4 shadow-sm ring-1 ring-inset ring-primary/10 dark:bg-primary/[0.09] dark:border-primary/40"
+      aria-labelledby="slip-exchange-heading"
+      className="rounded-xl border border-border/80 bg-muted/20 p-4 shadow-sm ring-1 ring-inset ring-border/30"
     >
+      <input
+        ref={slipFileInputRef}
+        type="file"
+        accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
+        className="hidden"
+        onChange={handleSlipSequenceFileChange}
+      />
       <div className="flex flex-wrap items-start gap-4">
         <div
-          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm"
+          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground"
           aria-hidden
         >
-          <Upload className="h-5 w-5" />
+          <FileText className="h-5 w-5" />
         </div>
-        <div className="min-w-0 flex-1 space-y-4">
+        <div className="min-w-0 flex-1 space-y-3">
           <header>
-            <h3 id="signed-placement-slip-heading" className="text-base font-semibold tracking-tight text-foreground">
-              Signed Placement slip
+            <h3 id="slip-exchange-heading" className="text-base font-semibold tracking-tight text-foreground">
+              Slip document sequence
             </h3>
-            <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-              Upload the executed slip (PDF or image) for facultative inward records.
-            </p>
           </header>
-          <input
-            ref={signedFacSlipInputRef}
-            type="file"
-            accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
-            className="hidden"
-            onChange={handleSignedFacSlipChange}
-          />
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch sm:gap-4">
-            <Button
-              type="button"
-              variant="outline"
-              className="h-10 shrink-0 gap-2 border-primary/45 bg-background hover:bg-primary/10 hover:text-foreground"
-              onClick={() => signedFacSlipInputRef.current?.click()}
-            >
-              <Upload className="h-4 w-4" />
-              Upload signed placement slip
-            </Button>
-            <div className="flex min-h-10 flex-1 items-center rounded-lg border border-dashed border-primary/35 bg-background/95 px-4 py-3 text-sm dark:bg-background/80">
-              {signedFacSlipName ? (
-                <span className="font-medium text-foreground">
-                  Attached: <span className="break-all text-primary">{signedFacSlipName}</span>
-                </span>
-              ) : (
-                <span className="text-muted-foreground">No file attached yet.</span>
-              )}
-            </div>
-          </div>
+          <ol className="space-y-2">
+            {FAC_INWARD_JOURNEY_STEPS.map((step, index) => {
+              const done = facJourneyCompleted[index];
+              const at = done ? facInwardStepTimestamp(record.submittedDate, index) : null;
+              const safeReq = record.requestId.replace(/[^a-zA-Z0-9-_]/g, '_');
+              const demoFileName = `${step.fileSlug}-${safeReq}.pdf`;
+              const party = FAC_SLIP_EXCHANGE_ROLES[index] ?? '—';
+              const localName = slipUploadByStep[index];
+              const generatedName = generatedSlipByStep[index];
+              const displayName =
+                index === signedPlacementStepIndex && signedFacSlipName
+                  ? signedFacSlipName
+                  : localName ?? generatedName ?? (done ? demoFileName : null);
+              const isActiveStep = firstIncompleteSlipStepIndex === index;
+              const copy = getSlipStepButtonCopy(step);
+
+              return (
+                <li
+                  key={step.label}
+                  className={cn(
+                    'grid grid-cols-1 items-start gap-x-4 gap-y-2.5 rounded-lg border px-3 py-2.5 transition-colors',
+                    'lg:grid-cols-[auto_minmax(0,1fr)_minmax(18rem,36rem)]',
+                    done
+                      ? 'border-border/50 bg-muted/45 text-muted-foreground shadow-[inset_0_1px_0_rgba(0,0,0,0.02)]'
+                      : isActiveStep
+                        ? 'border-primary/35 bg-background/90 text-muted-foreground/90 ring-1 ring-inset ring-primary/15'
+                        : 'border-dashed border-muted-foreground/25 bg-background/70 text-muted-foreground/85',
+                  )}
+                >
+                  <div className="mt-0.5 shrink-0" aria-hidden>
+                    {done ? (
+                      <CheckCircle2 className="h-5 w-5 text-muted-foreground/65" />
+                    ) : (
+                      <Circle className="h-5 w-5 text-muted-foreground/35" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                      <p
+                        className={cn(
+                          'text-sm font-medium',
+                          done ? 'text-foreground/70' : 'text-muted-foreground',
+                        )}
+                      >
+                        {step.label}
+                      </p>
+                      {at ? (
+                        <time
+                          className="text-[11px] tabular-nums text-muted-foreground/80"
+                          dateTime={at.toISOString()}
+                        >
+                          {formatFacInwardBritishDateTime(at)}
+                        </time>
+                      ) : (
+                        <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/60">
+                          Pending
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted-foreground/90">{party}</p>
+                    {displayName ? (
+                      <p className="mt-1 font-mono text-[11px] text-muted-foreground/75">{displayName}</p>
+                    ) : (
+                      <p className="mt-1 text-[11px] italic text-muted-foreground/65">
+                        Not yet recorded on this placement
+                      </p>
+                    )}
+                  </div>
+                  <div className="min-w-0 w-full lg:max-w-none">
+                    <div
+                      className="grid w-full gap-1.5"
+                      style={{
+                        gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)',
+                      }}
+                    >
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className={cn(
+                          'flex !h-auto min-h-0 w-full min-w-0 flex-row items-center justify-center gap-1 !px-1.5 !py-1.5 text-[11px] font-medium leading-tight',
+                          '!whitespace-normal text-balance shadow-sm sm:text-xs sm:leading-snug [&_svg]:!h-3.5 [&_svg]:!w-3.5',
+                        )}
+                        onClick={() => handleGenerateSlipForStep(index)}
+                      >
+                        <Download className="h-3.5 w-3.5 shrink-0 self-center" aria-hidden />
+                        <span className="min-w-0 break-words text-center">{copy.generate}</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className={cn(
+                          'flex !h-auto min-h-0 w-full min-w-0 flex-row items-center justify-center gap-1 !px-1.5 !py-1.5 text-[11px] font-medium leading-tight',
+                          '!whitespace-normal text-balance shadow-sm sm:text-xs sm:leading-snug [&_svg]:!h-3.5 [&_svg]:!w-3.5',
+                          isActiveStep && firstIncompleteSlipStepIndex !== -1 && 'border-primary/50 ring-1 ring-primary/20',
+                        )}
+                        onClick={() => openSlipStepUpload(index)}
+                      >
+                        <Upload className="h-3.5 w-3.5 shrink-0 self-center" aria-hidden />
+                        <span className="min-w-0 break-words text-center">{copy.upload}</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        className={cn(
+                          'flex !h-auto min-h-0 w-full min-w-0 flex-row items-center justify-center gap-1 !px-1.5 !py-1.5 text-[11px] font-medium leading-tight',
+                          '!whitespace-normal text-balance shadow-sm sm:text-xs sm:leading-snug [&_svg]:!h-3.5 [&_svg]:!w-3.5',
+                        )}
+                        onClick={() => handleSlipStepWorkflowAction(index)}
+                      >
+                        <Send className="h-3.5 w-3.5 shrink-0 self-center" aria-hidden />
+                        <span className="min-w-0 break-words text-center">{copy.action}</span>
+                      </Button>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
         </div>
       </div>
     </section>
@@ -901,14 +1349,24 @@ export default function ReinsurerBrokerRequestDetails({
                 variant="ghost"
                 size="sm"
                 className="gap-2 shrink-0 text-foreground hover:bg-muted hover:text-foreground"
-                onClick={() =>
-                  isReinsurerDetailPage
-                    ? navigate(
-                        backFromReinsurerDetailPath ?? `${referralBase}/${recordId}`,
-                        backFromReinsurerDetailPath ? undefined : { state: { record } },
-                      )
-                    : navigate(dashboardPath)
-                }
+                onClick={() => {
+                  if (isReinsurerDetailPage) {
+                    navigate(
+                      backFromReinsurerDetailPath ?? `${referralBase}/${recordId}`,
+                      backFromReinsurerDetailPath ? undefined : { state: { record } },
+                    );
+                    return;
+                  }
+                  if (portal === 'reinsurer') {
+                    navigate(dashboardPath);
+                    return;
+                  }
+                  if (navigateReturnTo) {
+                    navigate(navigateReturnTo);
+                    return;
+                  }
+                  navigate(dashboardPath);
+                }}
               >
                 <ArrowLeft className="h-4 w-4" />
                 Back
@@ -917,29 +1375,94 @@ export default function ReinsurerBrokerRequestDetails({
                 <h1 className="text-xl font-semibold leading-snug tracking-tight text-foreground">
                   {isReinsurerDetailPage
                     ? `Reinsurer detail — ${reinsurerRequestStatuses.find((item) => item.id === selectedReinsurerId)?.name ?? record.reinsurer}`
-                    : portal === 'insurer'
-                      ? 'Facultative Inwards - request details'
+                    : showInwardFacShell
+                      ? portal === 'reinsurer'
+                        ? 'Facultative slips – request details'
+                        : 'Facultative Inwards - request details'
                       : 'Facultative request details'}
                 </h1>
                 <p className="mt-0.5 text-sm text-muted-foreground">{record.requestId}</p>
               </div>
             </div>
-            {portal === 'insurer' ? (
+            {showInwardFacShell && !isBrokerFacOutwardDetail ? (
+              <div className="flex flex-wrap items-center gap-3 sm:gap-4 lg:ml-auto">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Label htmlFor="ai-risk-suggestions" className="mb-0 text-sm font-medium text-foreground">
+                    AI Risk suggestion
+                  </Label>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        aria-label="About AI Risk suggestions"
+                      >
+                        <Info className="h-4 w-4" aria-hidden />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-sm text-xs leading-relaxed">
+                      AI Risk suggestions are indicative and illustrative only. They are not underwriting advice, a
+                      commitment to terms, or a substitute for your own judgment, pricing models, and internal guidelines.
+                      Treat all scores and ranges as suggestive signals, not definitive decisions.
+                    </TooltipContent>
+                  </Tooltip>
+                  <Switch
+                    id="ai-risk-suggestions"
+                    className="shrink-0 data-[state=checked]:bg-gradient-to-r data-[state=checked]:from-violet-600 data-[state=checked]:via-blue-600 data-[state=checked]:to-cyan-500"
+                    checked={aiRiskSuggestionsEnabled}
+                    onCheckedChange={setAiRiskSuggestionsEnabled}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="ai-gradient-shimmer h-9 shrink-0 gap-2"
+                  onClick={() =>
+                    navigate(
+                      portal === 'reinsurer'
+                        ? '/reinsurer/analytics'
+                        : embedInwardFacLayout
+                          ? '/reinsurer-broker/dashboard'
+                          : '/insurer/command-center',
+                    )
+                  }
+                >
+                  <Brain className="h-4 w-4" />
+                  Immersive Risk Assessment
+                </Button>
+              </div>
+            ) : showReinsurerRequestsList && !pathOverrides ? (
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                className="ai-gradient-shimmer h-9 shrink-0 gap-2 lg:ml-auto"
-                onClick={() => navigate('/insurer/command-center')}
+                className="gap-2 shrink-0 lg:ml-auto"
+                onClick={() => {
+                  setBrokerArrangeFacDraft({
+                    id: `fac-${Date.now()}`,
+                    cededSumInsured: 0,
+                    rows: [
+                      {
+                        id: `new-${Date.now()}`,
+                        reinsurerId: '',
+                        name: '',
+                        sharePercent: 0,
+                        commissionPercent: 0,
+                      },
+                    ],
+                    isNew: true,
+                  });
+                }}
               >
-                <Brain className="h-4 w-4" />
-                Immersive Risk Assessment
+                <Plus className="h-4 w-4" />
+                Need Facultative
               </Button>
             ) : null}
           </div>
 
           <div className="space-y-6 p-4">
-            {portal === 'insurer' && (
+            {showInwardFacShell && (
               <>
                 {showReinsurerDetailPanels ? (
                   <FacInwardRequestJourney
@@ -948,6 +1471,7 @@ export default function ReinsurerBrokerRequestDetails({
                     signedFacSlipName={signedFacSlipName}
                     requestId={record.requestId}
                     submittedDate={record.submittedDate}
+                    title={isBrokerFacOutwardDetail ? 'Facultative Outwards journey' : undefined}
                   />
                 ) : null}
                 <section className="space-y-5 rounded-2xl border border-slate-200/90 bg-gradient-to-b from-slate-50 via-white to-white p-5 shadow-sm md:p-6">
@@ -956,48 +1480,46 @@ export default function ReinsurerBrokerRequestDetails({
                     {showReinsurerDetailPanels && (
                       <>
                         <Card className="overflow-hidden rounded-lg border border-slate-200 bg-card shadow-sm ring-1 ring-slate-100">
-                          <div className="bg-primary px-4 py-5 text-primary-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] md:px-5 md:py-6">
-                            <div className="mx-auto mb-5 flex max-w-none flex-col gap-4 border-b border-primary-foreground/20 pb-5 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+                          <div className="border-b border-border bg-muted/30 px-4 py-5 md:px-5 md:py-6">
+                            <div className="mx-auto flex max-w-none flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
                               <div className="min-w-0 space-y-1">
-                                <CardTitle className="text-base text-primary-foreground">Summary</CardTitle>
-                                <CardDescription className="text-primary-foreground/85">
+                                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                  Summary
+                                </p>
+                                <p className="text-sm leading-relaxed text-muted-foreground">
                                   Identifiers, parties, exposure, and inward context.
-                                </CardDescription>
+                                </p>
                               </div>
-                              <div className="flex shrink-0 sm:pt-0.5 sm:justify-end">
-                                {!isReinsurerDetailPage ? (
+                              {showAttachedDocumentsInSummary ? (
+                                <div className="flex shrink-0 sm:pt-0.5 sm:justify-end">
                                   <Button
                                     type="button"
-                                    variant="secondary"
+                                    variant="ghost"
                                     size="sm"
-                                    className="h-9 gap-1.5 border-0 bg-primary-foreground/15 text-primary-foreground shadow-sm hover:bg-primary-foreground/25 hover:text-primary-foreground"
+                                    className="h-9 gap-1.5 border border-border/80 bg-background/80 text-foreground shadow-none hover:bg-muted"
                                     onClick={() => setInsurerDocumentsDialogOpen(true)}
                                   >
                                     <FileText className="h-3.5 w-3.5" />
                                     Attached documents
                                   </Button>
-                                ) : (
-                                  <span className="max-w-xs text-right text-sm text-primary-foreground/80 sm:max-w-none">
-                                    Underlying documents per referral.
-                                  </span>
-                                )}
-                              </div>
+                                </div>
+                              ) : null}
                             </div>
+                          </div>
 
+                          <div className="bg-primary px-4 py-5 text-primary-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] md:px-5 md:py-6">
                             <div className="mx-auto mb-5 flex max-w-none flex-col gap-3 border-b border-primary-foreground/20 pb-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                               <div className="flex min-w-0 items-start gap-3">
                                 <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-foreground/15 text-primary-foreground shadow-sm backdrop-blur-sm">
                                   <ClipboardList className="h-5 w-5 opacity-95" aria-hidden />
                                 </span>
                                 <div className="min-w-0">
-                                  <h3 id="requirement-summary-heading" className="text-base font-semibold tracking-tight">
+                                  <h3
+                                    id="requirement-summary-heading"
+                                    className="text-xl font-bold tracking-tight text-primary-foreground"
+                                  >
                                     Requirement summary
                                   </h3>
-                                  <p className="mt-1 text-sm leading-relaxed text-primary-foreground/85">
-                                    Key limits, retention, ceded line and commission. Enable{' '}
-                                    <span className="font-semibold text-primary-foreground">AI Risk suggestion</span> above
-                                    for peer/model bands and per-metric signals in Submission details.
-                                  </p>
                                 </div>
                               </div>
                               <Badge className="h-fit w-fit shrink-0 border-0 bg-primary-foreground/20 px-3 py-1 text-xs font-semibold text-primary-foreground hover:bg-primary-foreground/25">
@@ -1005,18 +1527,18 @@ export default function ReinsurerBrokerRequestDetails({
                               </Badge>
                             </div>
 
-                            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+                            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                               {requirementSummary.map(([label, value]) => {
                                 const reqInsight = requirementSummaryAiInsight(label);
                                 return (
                                   <div
                                     key={label}
-                                    className="rounded-xl bg-background/97 p-3 text-foreground shadow-md backdrop-blur-sm dark:bg-card/96"
+                                    className="rounded-xl border border-white/20 bg-white p-3 shadow-md dark:border-white/10 dark:bg-zinc-950"
                                   >
-                                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-zinc-400">
                                       {label}
                                     </p>
-                                    <p className="mt-1 text-sm font-semibold text-foreground">{value}</p>
+                                    <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-zinc-50">{value}</p>
                                     {aiRiskSuggestionsEnabled ? (
                                       <>
                                         <div className="mt-2 rounded-lg border border-emerald-200/80 bg-emerald-50/50 px-2.5 py-2 ring-1 ring-inset ring-emerald-200/40 dark:border-emerald-500/30 dark:bg-emerald-950/25 dark:ring-emerald-500/20">
@@ -1118,8 +1640,7 @@ export default function ReinsurerBrokerRequestDetails({
                         </Card>
 
                         <Tabs defaultValue="submission-details" className="w-full">
-                          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                            <TabsList className="flex h-11 w-full max-w-full min-w-0 shrink-0 items-stretch gap-0 overflow-x-auto rounded-xl border border-slate-200/90 bg-slate-100/95 p-1 shadow-inner lg:w-auto lg:min-w-[42rem] lg:overflow-visible">
+                          <TabsList className="flex h-11 w-full max-w-full min-w-0 shrink-0 items-stretch gap-0 overflow-x-auto rounded-xl border border-slate-200/90 bg-slate-100/95 p-1 shadow-inner lg:w-auto lg:min-w-[42rem] lg:overflow-visible">
                               <TabsTrigger
                                 value="submission-details"
                                 className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center whitespace-nowrap rounded-lg px-3 py-0 text-center text-xs font-medium leading-none text-muted-foreground shadow-none ring-offset-background transition-colors data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm data-[state=inactive]:hover:bg-muted/50 data-[state=inactive]:hover:text-foreground sm:text-sm sm:leading-none"
@@ -1133,18 +1654,6 @@ export default function ReinsurerBrokerRequestDetails({
                                 Facultative Reinsurance Actions
                               </TabsTrigger>
                             </TabsList>
-                            <div className="flex flex-wrap items-center gap-2 lg:shrink-0">
-                              <Label htmlFor="ai-risk-suggestions" className="mb-0 text-sm font-medium text-foreground">
-                                AI Risk suggestion
-                              </Label>
-                              <Switch
-                                id="ai-risk-suggestions"
-                                className="shrink-0 data-[state=checked]:bg-gradient-to-r data-[state=checked]:from-violet-600 data-[state=checked]:via-blue-600 data-[state=checked]:to-cyan-500"
-                                checked={aiRiskSuggestionsEnabled}
-                                onCheckedChange={setAiRiskSuggestionsEnabled}
-                              />
-                            </div>
-                          </div>
 
                           <TabsContent value="submission-details" className="mt-4 space-y-4 focus-visible:outline-none">
                             <div className="space-y-10">
@@ -1294,7 +1803,7 @@ export default function ReinsurerBrokerRequestDetails({
                                     <CardDescription>Placement line, share and premiums.</CardDescription>
                                   </div>
                                   {!isEditingPlacement ? (
-                                    <Button variant="outline" size="sm" className="gap-2" onClick={() => setIsEditingPlacement(true)}>
+                                    <Button variant="outline" size="sm" className="gap-2" onClick={beginPlacementEdit}>
                                       <Pencil className="h-4 w-4" />
                                       Edit Placement
                                     </Button>
@@ -1369,43 +1878,25 @@ export default function ReinsurerBrokerRequestDetails({
                                       id="placement-comment-insurer"
                                       value={placement.comment}
                                       onChange={(event) => setPlacement((prev) => ({ ...prev, comment: event.target.value }))}
-                                      placeholder="Add a note for your facultative underwriting audit trail"
+                                      placeholder={
+                                        isBrokerFacOutwardDetail
+                                          ? 'Add a comment for the edit history'
+                                          : 'Add a note for your facultative underwriting audit trail'
+                                      }
                                     />
                                   </div>
                                 )}
 
-                                <div className="overflow-hidden rounded-lg border bg-white shadow-sm">
-                                  <div className="border-b bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
-                                    Edit History
-                                  </div>
-                                  <div className="overflow-x-auto">
-                                    <table className="w-full min-w-[50rem] text-sm">
-                                      <thead className="text-left text-xs uppercase tracking-wide text-muted-foreground">
-                                        <tr>
-                                          <th className="px-4 py-3">Date</th>
-                                          <th className="px-4 py-3">Updated By</th>
-                                          <th className="px-4 py-3">Summary</th>
-                                          <th className="px-4 py-3">Comment</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody className="divide-y">
-                                        {history.map((item) => (
-                                          <tr key={`${item.date}-${item.summary}`}>
-                                            <td className="px-4 py-3">{item.date}</td>
-                                            <td className="px-4 py-3">{item.updatedBy}</td>
-                                            <td className="px-4 py-3 font-semibold">{item.summary}</td>
-                                            <td className="px-4 py-3 text-muted-foreground">{item.comment}</td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                </div>
+                                <PlacementEditHistoryTable
+                                  history={history}
+                                  wrapClassName="overflow-hidden rounded-lg border bg-white shadow-sm"
+                                  headerClassName="border-b bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900"
+                                />
                               </CardContent>
                             </Card>
 
                             <Collapsible
-                              defaultOpen={false}
+                              defaultOpen={isBrokerFacOutwardDetail}
                               className="group rounded-lg border border-slate-200 bg-card shadow-sm ring-1 ring-slate-100 data-[state=closed]:overflow-hidden"
                             >
                               <Card className="border-0 shadow-none ring-0">
@@ -1449,35 +1940,49 @@ export default function ReinsurerBrokerRequestDetails({
                                     <div>
                                       <Label className="text-base font-semibold text-slate-900">CEWs on placement</Label>
                                       <p className="mt-1 text-sm text-muted-foreground">
-                                        Uncheck any clause, extension, or warranty that should not apply to the signed facultative
-                                        placement.
+                                        {brokerReferralPlacementCewReadOnly
+                                          ? 'Clauses, extensions, and warranties on this placement are fixed for broker review.'
+                                          : 'Uncheck any clause, extension, or warranty that should not apply to the signed facultative placement.'}
                                       </p>
                                     </div>
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      className="shrink-0 gap-1.5"
-                                      disabled={placementFinalised}
-                                      onClick={() => {
-                                        resetAddCewForm();
-                                        setAddCewDialogOpen(true);
-                                      }}
-                                    >
-                                      <Plus className="h-4 w-4" />
-                                      Add CEW
-                                    </Button>
+                                    {!brokerReferralPlacementCewReadOnly ? (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="shrink-0 gap-1.5"
+                                        disabled={placementFinalised}
+                                        onClick={() => {
+                                          resetAddCewForm();
+                                          setAddCewDialogOpen(true);
+                                        }}
+                                      >
+                                        <Plus className="h-4 w-4" />
+                                        Add CEW
+                                      </Button>
+                                    ) : null}
                                   </div>
-                                  <div className="divide-y rounded-lg border bg-white shadow-sm">
+                                  <div
+                                    className={cn(
+                                      'divide-y rounded-lg border bg-white shadow-sm',
+                                      brokerReferralPlacementCewReadOnly && 'bg-muted/20',
+                                    )}
+                                  >
                                     {placementCewItems.map((item) => (
                                       <label
                                         key={item.id}
                                         htmlFor={`placement-cew-${item.id}`}
-                                        className="flex cursor-pointer gap-3 px-4 py-3 hover:bg-muted/40"
+                                        className={cn(
+                                          'flex gap-3 px-4 py-3',
+                                          brokerReferralPlacementCewReadOnly
+                                            ? 'cursor-not-allowed opacity-80'
+                                            : 'cursor-pointer hover:bg-muted/40',
+                                        )}
                                       >
                                         <Checkbox
                                           id={`placement-cew-${item.id}`}
                                           checked={includedCewIds.has(item.id)}
+                                          disabled={brokerReferralPlacementCewReadOnly || placementFinalised}
                                           onCheckedChange={(checked) =>
                                             setIncludedCewIds((prev) => {
                                               const next = new Set(prev);
@@ -1505,41 +2010,87 @@ export default function ReinsurerBrokerRequestDetails({
                                   </p>
                                 </div>
 
-                                {signedPlacementSlipSection}
+                                {slipExchangeSection}
 
-                                <div className="flex flex-col gap-3 border-t border-border pt-6 sm:flex-row sm:items-center sm:justify-between">
-                                  <p className="max-w-xl text-sm text-muted-foreground">
-                                    {placementFinalised
-                                      ? 'This facultative placement has been marked as finalised. Further changes should go through endorsement or a new fac request.'
-                                      : 'Finalising records the inward placement with your CEW selections and the attached signed slip.'}
-                                  </p>
-                                  <Button
-                                    type="button"
-                                    variant="default"
-                                    className="shrink-0 gap-2 sm:min-w-[12rem]"
-                                    disabled={placementFinalised}
-                                    onClick={handleFinalisePlacement}
+                                {!brokerReferralPlacementCewReadOnly ? (
+                                  <div
+                                    className={cn(
+                                      'flex flex-col gap-3 border-t border-border pt-6 sm:flex-row sm:items-center',
+                                      placementFinalised ? 'sm:justify-between' : 'sm:justify-end',
+                                    )}
                                   >
-                                    <CheckCircle2 className="h-4 w-4" />
-                                    {placementFinalised ? 'Placement finalised' : 'Finalise placement'}
-                                  </Button>
-                                </div>
+                                    {placementFinalised ? (
+                                      <p className="max-w-xl text-sm text-muted-foreground">
+                                        This facultative placement has been marked as finalised. Further changes should go
+                                        through endorsement or a new fac request.
+                                      </p>
+                                    ) : null}
+                                    <Button
+                                      type="button"
+                                      variant="default"
+                                      className="shrink-0 gap-2 sm:min-w-[12rem]"
+                                      disabled={placementFinalised}
+                                      onClick={handleFinalisePlacement}
+                                    >
+                                      <CheckCircle2 className="h-4 w-4" />
+                                      {placementFinalised ? 'Placement finalised' : 'Finalise placement'}
+                                    </Button>
+                                  </div>
+                                ) : null}
                               </CardContent>
                             </Card>
                           </TabsContent>
                         </Tabs>
 
-                        {!isReinsurerDetailPage ? (
+                        {showAttachedDocumentsInSummary ? (
                           <Dialog open={insurerDocumentsDialogOpen} onOpenChange={setInsurerDocumentsDialogOpen}>
                             <DialogContent className="flex max-h-[min(92vh,56rem)] w-[min(96vw,calc(100vw-2rem))] flex-col gap-0 overflow-hidden p-0 sm:max-w-6xl">
                               <DialogHeader className="shrink-0 space-y-1.5 border-b px-6 py-4 text-left">
                                 <DialogTitle>Attached documents</DialogTitle>
                                 <DialogDescription className="text-left">
-                                  {requestDocuments.length} uploaded files for this facultative inward request.
+                                  {requestDocuments.length + 1} files for this facultative request
+                                  {isBrokerFacOutwardDetail ? ' (outward placement journey)' : ''}.
                                 </DialogDescription>
                               </DialogHeader>
                               <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
                                 <div className="divide-y divide-border rounded-lg border">
+                                  <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 bg-muted/20">
+                                    <div className="flex min-w-0 flex-1 items-start gap-3">
+                                      <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                                      <div className="min-w-0">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <span className="text-sm font-medium text-foreground">
+                                            Facultative request slip
+                                          </span>
+                                          <Badge
+                                            variant="outline"
+                                            className="border-primary/40 text-xs font-normal text-primary"
+                                          >
+                                            Generated
+                                          </Badge>
+                                        </div>
+                                        <p className="mt-0.5 text-xs text-muted-foreground">
+                                          Word document — same template as Facultative New outreach (referral + line
+                                          terms).
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="shrink-0 gap-1"
+                                      disabled={facSlipDocDownloading}
+                                      onClick={() => void handleDownloadFacRequestSlipDocx()}
+                                    >
+                                      {facSlipDocDownloading ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      ) : (
+                                        <Download className="h-3.5 w-3.5" />
+                                      )}
+                                      Download
+                                    </Button>
+                                  </div>
                                   {requestDocuments.map((doc) => (
                                     <div
                                       key={doc.fileName}
@@ -1588,278 +2139,149 @@ export default function ReinsurerBrokerRequestDetails({
                 </section>
               </>
             )}
-            {portal !== 'insurer' && (
+            {portal === 'broker' && (
             <>
-            {!isReinsurerDetailPage && (
-              <>
-            <Card>
-              <CardHeader className="border-b">
-                {inwardFacPortal(portal) ? (
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                    <CardTitle className="text-base font-semibold tracking-tight">Facultative Request details</CardTitle>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="ai-gradient-shimmer h-9 gap-2"
-                        onClick={() =>
-                          navigate(portal === 'reinsurer' ? '/reinsurer/analytics' : '/insurer/command-center')
-                        }
-                      >
-                        <Brain className="h-4 w-4" />
-                        Immersive Risk Assessment
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-9 gap-2"
-                        onClick={handleDownloadFacPlacementSlip}
-                      >
-                        <Download className="h-4 w-4" />
-                        Download Placement Slip
-                      </Button>
-                    </div>
+            {showReinsurerRequestsList ? (
+            <>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+                {(
+                  [
+                    ['Requested cession SI', fmtAED(brokerReferralOverviewMetrics.requestedCessionSi), 'Sum insured requested for facultative cession'],
+                    ['Ceded SI (placed)', fmtAED(brokerReferralOverviewMetrics.cededSi), 'Share allocated across active lines (excl. declined)'],
+                    [
+                      'Ceded SI (Yet to be placed)',
+                      fmtAED(brokerReferralOverviewMetrics.cededSiYetToBePlaced),
+                      'Remaining requested SI not yet allocated to reinsurer lines',
+                    ],
+                    ['Premium', fmtAED(brokerReferralOverviewMetrics.premium), 'Gross premium on this facultative referral'],
+                    ['Commission', fmtAED(brokerReferralOverviewMetrics.commission), 'Aggregate brokerage commission on lines'],
+                  ] as const
+                ).map(([label, value, hint]) => (
+                  <div
+                    key={label}
+                    className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm ring-1 ring-slate-100"
+                    title={hint}
+                  >
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+                    <p className="mt-2 text-lg font-bold tabular-nums text-slate-900 sm:text-xl">{value}</p>
                   </div>
-                ) : (
-                  <CardTitle>Facultative Request details</CardTitle>
-                )}
+                ))}
+              </div>
+            <Card className="border-blue-200/80 bg-blue-50/30 shadow-sm ring-1 ring-blue-100">
+              <CardHeader className="border-b border-blue-100/80 pb-4">
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <CardTitle className="text-base font-semibold text-blue-950">Facultative outbound</CardTitle>
+                    <Badge variant="outline" className="border-amber-200 bg-amber-50 text-xs text-amber-800">
+                      Facultative
+                    </Badge>
+                  </div>
+                </div>
               </CardHeader>
-              <CardContent className="space-y-5 p-4">
-                <div className="space-y-4">
-                  <div className="rounded-lg border bg-white p-4">
-                    <h3 className="text-base font-semibold text-foreground">Upload Request Documents</h3>
-                    <div className="mt-4 grid gap-4">
-                      <Card className="border-border bg-card shadow-sm ring-1 ring-inset ring-success/20">
-                        <CardContent className="p-4 lg:p-5">
-                          <div className="flex min-w-0 gap-3 lg:gap-4">
-                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-success/30 bg-success/10">
-                              <CheckCircle className="h-5 w-5 text-success" />
-                            </div>
-                            <div className="min-w-0 flex-1 space-y-2">
-                              <div className="flex flex-wrap items-center justify-between gap-2">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <h4 className="text-sm font-semibold text-foreground lg:text-base">Proposal Form</h4>
-                                  <Badge variant="outline" className="border-success text-success">Uploaded</Badge>
-                                </div>
+              <CardContent className="space-y-5 pt-6">
+                <div className="flex flex-col gap-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-baseline gap-2">
+                    <span className="font-medium text-muted-foreground">Ceded SI (requested)</span>
+                    <span className="font-semibold tabular-nums text-slate-900">{fmtAED(record.requestedCededSI)}</span>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="font-medium text-muted-foreground">Gross premium (referral)</span>
+                    <span className="font-semibold tabular-nums text-slate-900">{fmtAED(record.premium)}</span>
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-sm font-semibold text-slate-900 mb-2">Reinsurer panel</p>
+                  <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+                    <table className="w-full min-w-[52rem] border-collapse text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-200 bg-slate-50/90 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          <th className="px-3 py-2.5 whitespace-nowrap">Request ID</th>
+                          <th className="px-3 py-2.5 whitespace-nowrap">Risk ID</th>
+                          <th className="px-3 py-2.5 whitespace-nowrap">Target reinsurer</th>
+                          <th className="px-3 py-2.5 whitespace-nowrap">Status</th>
+                          <th className="px-3 py-2.5 text-right whitespace-nowrap">Requested ceded SI</th>
+                          <th className="px-3 py-2.5 text-right whitespace-nowrap">Premium</th>
+                          <th className="px-3 py-2.5 text-right whitespace-nowrap w-[1%]">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {reinsurerRequestStatuses.map((request) => {
+                          const lineCessionFrac =
+                            Number(String(request.cessionPercent).replace(/%/g, '')) / 100 || 0;
+                          const lineRequestedCessionSi = Math.round(record.requestedCededSI * lineCessionFrac);
+
+                          return (
+                            <tr key={request.id} className="hover:bg-slate-50/80 transition-colors">
+                              <td className="px-3 py-2.5 font-medium text-slate-900 whitespace-nowrap">
+                                {record.requestId}
+                              </td>
+                              <td className="px-3 py-2.5 text-slate-700 whitespace-nowrap">{record.riskId}</td>
+                              <td className="px-3 py-2.5 font-medium text-slate-900 whitespace-nowrap">
+                                {request.name}
+                              </td>
+                              <td className="px-3 py-2.5 whitespace-nowrap">
+                                <Badge variant="outline" className={statusBadgeClass(request.status)}>
+                                  {request.status}
+                                </Badge>
+                              </td>
+                              <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">
+                                {fmtAED(lineRequestedCessionSi)}
+                              </td>
+                              <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">
+                                {request.premium}
+                              </td>
+                              <td className="px-3 py-2.5 text-right whitespace-nowrap align-middle">
                                 <Button
-                                  type="button"
                                   variant="outline"
                                   size="sm"
-                                  className="shrink-0 gap-1.5"
-                                  onClick={() => openDocumentDemo('PAR-proposal-form.pdf', 'Proposal Form')}
+                                  className="gap-1.5 whitespace-nowrap"
+                                  onClick={() =>
+                                    navigate(`${referralBase}/${record.id}/reinsurer/${request.id}`, {
+                                      state: navigateReturnTo
+                                        ? { record, returnTo: navigateReturnTo }
+                                        : { record },
+                                    })
+                                  }
                                 >
-                                  <Eye className="h-3.5 w-3.5" />
-                                  View
+                                  View details
+                                  <ArrowRight className="h-3.5 w-3.5 shrink-0" />
                                 </Button>
-                              </div>
-                              <p className="text-xs text-muted-foreground lg:text-sm">
-                                Main proposal form used to populate the submitted proposal details.
-                              </p>
-                              <span className="inline-flex min-w-0 items-center gap-1.5 text-xs font-medium text-foreground lg:text-sm">
-                                <FileText className="h-3.5 w-3.5 shrink-0 text-primary" />
-                                <span className="truncate">PAR-proposal-form.pdf</span>
-                              </span>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-
-                      <div className="space-y-5 rounded-lg border bg-white p-4">
-                        <h3 className="text-base font-semibold text-foreground">Underwriting Documents</h3>
-                        <div className="grid gap-4 lg:gap-5">
-                          {requestDocuments.slice(1).map((doc) => (
-                            <Card key={`${doc.category}-${doc.fileName}`} className="border-border bg-card shadow-sm ring-1 ring-inset ring-success/20">
-                              <CardContent className="p-4 lg:p-5">
-                                <div className="flex min-w-0 gap-3 lg:gap-4">
-                                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-success/30 bg-success/10">
-                                    <CheckCircle className="h-5 w-5 text-success" />
-                                  </div>
-                                  <div className="min-w-0 flex-1 space-y-2">
-                                    <div className="flex flex-wrap items-center justify-between gap-2">
-                                      <div className="flex flex-wrap items-center gap-2">
-                                        <h4 className="text-sm font-semibold text-foreground lg:text-base">{doc.title}</h4>
-                                        <Badge variant="outline" className="border-success text-success">Uploaded</Badge>
-                                        <Badge variant="outline">{doc.category}</Badge>
-                                      </div>
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        className="shrink-0 gap-1.5"
-                                        onClick={() => openDocumentDemo(doc.fileName, doc.title)}
-                                      >
-                                        <Eye className="h-3.5 w-3.5" />
-                                        View
-                                      </Button>
-                                    </div>
-                                    <span className="inline-flex min-w-0 items-center gap-1.5 text-xs font-medium text-foreground lg:text-sm">
-                                      <FileText className="h-3.5 w-3.5 shrink-0 text-primary" />
-                                      <span className="truncate" title={doc.fileName}>{doc.fileName}</span>
-                                    </span>
-                                  </div>
-                                </div>
-                              </CardContent>
-                            </Card>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot>
+                        <tr className="border-t border-slate-200 bg-slate-50/60 font-semibold text-slate-900">
+                          <td className="px-3 py-2.5" colSpan={4}>
+                            Total
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">
+                            {fmtAED(
+                              reinsurerRequestStatuses.reduce((sum, rq) => {
+                                const f =
+                                  Number(String(rq.cessionPercent).replace(/%/g, '')) / 100 || 0;
+                                return sum + Math.round(record.requestedCededSI * f);
+                              }, 0),
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">
+                            {fmtAED(reinsurerRequestStatuses.reduce((s, rq) => s + rq.premiumAED, 0))}
+                          </td>
+                          <td className="px-3 py-2.5" />
+                        </tr>
+                      </tfoot>
+                    </table>
                   </div>
-
-                  <Card className="border border-slate-200 bg-white shadow-sm">
-                    <CardHeader className="border-b">
-                      <CardTitle>Proposal Form</CardTitle>
-                      <p className="text-sm text-muted-foreground">Full proposal template with submitted values.</p>
-                    </CardHeader>
-                    <CardContent className="space-y-4 p-4">
-                      {proposalSections.map((section) => (
-                        <Card key={section.title} className="border border-slate-200 bg-white shadow-sm">
-                          <CardHeader className="border-b px-4 py-3">
-                            <CardTitle className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                              <span className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-                                <FileText className="h-4 w-4" />
-                              </span>
-                              {section.title}
-                            </CardTitle>
-                          </CardHeader>
-                          <CardContent className="p-0">
-                            <div className="grid grid-cols-1 md:grid-cols-3">
-                              {section.fields.map(([label, value], index) => {
-                                const isLastInRow = (index + 1) % 3 === 0;
-                                const isAltRow = Math.floor(index / 3) % 2 === 0;
-                                const isAttachments = section.title === 'Attachments';
-                                return (
-                                  <div
-                                    key={label}
-                                    className={`border-b border-border px-4 py-3 ${!isLastInRow ? 'md:border-r' : ''} ${isAltRow ? 'bg-muted/30' : 'bg-white'}`}
-                                  >
-                                    <div className="mb-1 text-xs text-muted-foreground">{label}</div>
-                                    <div className="flex flex-wrap items-center justify-between gap-2">
-                                      <div className="min-w-0 break-all text-sm font-semibold text-foreground">{value}</div>
-                                      {isAttachments ? (
-                                        <Button
-                                          type="button"
-                                          variant="outline"
-                                          size="sm"
-                                          className="shrink-0 gap-1.5"
-                                          onClick={() => openDocumentDemo(String(value), label)}
-                                        >
-                                          <Eye className="h-3.5 w-3.5" />
-                                          View
-                                        </Button>
-                                      ) : null}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </CardContent>
-                        </Card>
-                      ))}
-                    </CardContent>
-                  </Card>
-
-                  <Card className="border border-slate-200 bg-white shadow-sm">
-                    <CardHeader className="border-b px-4 py-3">
-                      <CardTitle className="text-sm font-semibold text-slate-900">CEWs</CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-0">
-                      <div className="divide-y">
-                        {placementCewItems.map((item) => (
-                          <div key={item.id} className="px-4 py-3">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="text-sm font-semibold text-slate-900">{item.name}</p>
-                              <Badge variant="outline" className="h-fit w-fit shrink-0">{item.type}</Badge>
-                            </div>
-                            <p className="mt-1 text-sm text-muted-foreground">{item.detail}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="border border-slate-200 bg-white shadow-sm">
-                    <CardHeader className="border-b px-4 py-3">
-                      <CardTitle className="text-sm font-semibold text-slate-900">Requirement Summary</CardTitle>
-                    </CardHeader>
-                    <CardContent className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-                      {requirementSummary.map(([label, value]) => (
-                        <div key={label} className="rounded-lg border bg-slate-50 p-3">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
-                          <p className="mt-1 text-sm font-semibold text-slate-900">{value}</p>
-                        </div>
-                      ))}
-                    </CardContent>
-                  </Card>
                 </div>
               </CardContent>
             </Card>
-
-            {showReinsurerRequestsList ? (
-            <Card>
-              <CardHeader className="border-b">
-                <CardTitle>Reinsurer Requests & Status</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 p-4">
-                {reinsurerRequestStatuses.map((request) => {
-                  const isSelected = selectedReinsurerId === request.id;
-
-                  return (
-                    <div
-                      key={request.id}
-                      className={`rounded-lg border p-4 transition ${isSelected ? 'border-primary bg-primary/5' : 'bg-white'}`}
-                    >
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="font-semibold text-slate-900">{request.name}</h3>
-                            <Badge variant="outline" className={statusBadgeClass(request.status)}>{request.status}</Badge>
-                            {isSelected && (
-                              <Badge variant="outline" className="border-primary text-primary">
-                                Viewing details
-                              </Badge>
-                            )}
-                          </div>
-                          <p className="mt-1 text-sm text-muted-foreground">Last update: {request.lastUpdate}</p>
-                        </div>
-                        <Button
-                          variant={isSelected ? 'default' : 'outline'}
-                          size="sm"
-                          onClick={() =>
-                            navigate(`${referralBase}/${record.id}/reinsurer/${request.id}`, {
-                              state: { record },
-                            })
-                          }
-                        >
-                          View Details
-                        </Button>
-                      </div>
-                      <div className="mt-4 grid gap-3 md:grid-cols-3">
-                        <div className="rounded-lg border bg-white p-3">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Cession %</p>
-                          <p className="mt-1 font-semibold text-slate-900">{request.cessionPercent}</p>
-                        </div>
-                        <div className="rounded-lg border bg-white p-3">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Premium Amount</p>
-                          <p className="mt-1 font-semibold text-slate-900">{request.premium}</p>
-                        </div>
-                        <div className="rounded-lg border bg-white p-3">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Commission Amount</p>
-                          <p className="mt-1 font-semibold text-slate-900">{request.commission}</p>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </CardContent>
-            </Card>
+            </>
             ) : null}
-              </>
-            )}
 
-            {showReinsurerDetailPanels && (
+            {showReinsurerDetailPanels && !embedInwardFacLayout && (
+            <>
             <Card>
               <CardHeader className="border-b">
                 <CardTitle>
@@ -1892,9 +2314,7 @@ export default function ReinsurerBrokerRequestDetails({
                 </div>
               </CardContent>
             </Card>
-            )}
 
-            {showReinsurerDetailPanels && (
             <Card>
               <CardHeader className="border-b">
                 <CardTitle>Risk Information</CardTitle>
@@ -1926,15 +2346,13 @@ export default function ReinsurerBrokerRequestDetails({
                 </div>
               </CardContent>
             </Card>
-            )}
 
-            {showReinsurerDetailPanels && (
             <Card>
               <CardHeader className="border-b">
                 <div className="flex items-center justify-between gap-3">
                   <CardTitle>Facultative Reinsurance</CardTitle>
                   {!isEditingPlacement ? (
-                    <Button variant="outline" size="sm" className="gap-2" onClick={() => setIsEditingPlacement(true)}>
+                    <Button variant="outline" size="sm" className="gap-2" onClick={beginPlacementEdit}>
                       <Pencil className="h-4 w-4" />
                       Edit Placement
                     </Button>
@@ -2000,36 +2418,14 @@ export default function ReinsurerBrokerRequestDetails({
                   </div>
                 )}
 
-                <div className="rounded-lg border">
-                  <div className="border-b bg-slate-50 px-4 py-3 font-semibold">Edit History</div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[50rem] text-sm">
-                      <thead className="text-left text-xs uppercase tracking-wide text-muted-foreground">
-                        <tr>
-                          <th className="px-4 py-3">Date</th>
-                          <th className="px-4 py-3">Updated By</th>
-                          <th className="px-4 py-3">Summary</th>
-                          <th className="px-4 py-3">Comment</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {history.map((item) => (
-                          <tr key={`${item.date}-${item.summary}`}>
-                            <td className="px-4 py-3">{item.date}</td>
-                            <td className="px-4 py-3">{item.updatedBy}</td>
-                            <td className="px-4 py-3 font-semibold">{item.summary}</td>
-                            <td className="px-4 py-3 text-muted-foreground">{item.comment}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                <PlacementEditHistoryTable
+                  history={history}
+                  wrapClassName="rounded-lg border"
+                  headerClassName="border-b bg-slate-50 px-4 py-3 font-semibold"
+                />
               </CardContent>
             </Card>
-            )}
 
-            {showReinsurerDetailPanels && (
             <Card>
               <CardHeader className="border-b">
                 <CardTitle>History & Timeline</CardTitle>
@@ -2046,9 +2442,8 @@ export default function ReinsurerBrokerRequestDetails({
                 ))}
               </CardContent>
             </Card>
-            )}
 
-            {showReinsurerDetailPanels && inwardFacPortal(portal) && (
+            {inwardFacPortal(portal) && (
               <Card>
                 <CardHeader className="border-b">
                   <CardTitle>Placement actions</CardTitle>
@@ -2115,14 +2510,20 @@ export default function ReinsurerBrokerRequestDetails({
                     </p>
                   </div>
 
-                  {signedPlacementSlipSection}
+                  {slipExchangeSection}
 
-                  <div className="flex flex-col gap-3 border-t border-border pt-6 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="max-w-xl text-sm text-muted-foreground">
-                      {placementFinalised
-                        ? 'This facultative placement has been marked as finalised. Further changes should go through endorsement or a new fac request.'
-                        : 'Finalising records the inward placement with your CEW selections and the attached signed slip.'}
-                    </p>
+                  <div
+                    className={cn(
+                      'flex flex-col gap-3 border-t border-border pt-6 sm:flex-row sm:items-center',
+                      placementFinalised ? 'sm:justify-between' : 'sm:justify-end',
+                    )}
+                  >
+                    {placementFinalised ? (
+                      <p className="max-w-xl text-sm text-muted-foreground">
+                        This facultative placement has been marked as finalised. Further changes should go through
+                        endorsement or a new fac request.
+                      </p>
+                    ) : null}
                     <Button
                       type="button"
                       variant="default"
@@ -2139,56 +2540,86 @@ export default function ReinsurerBrokerRequestDetails({
             )}
             </>
             )}
+            </>
+            )}
           </div>
         </div>
+      </div>
 
-        <Button
-          className="fixed bottom-6 right-6 z-40 gap-2 rounded-full shadow-lg"
-          onClick={() => setIsCommunicationOpen(true)}
-        >
-          <MessageSquare className="h-4 w-4" />
-          Reinsurance Chat
-        </Button>
-
-        {isCommunicationOpen && (
-          <div className="fixed bottom-20 right-6 z-50 w-[24rem] max-w-[calc(100vw-2rem)] rounded-xl border bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b bg-primary px-4 py-3 text-primary-foreground">
-              <div>
-                <p className="font-semibold">Queries & Communication</p>
-                <p className="text-xs text-primary-foreground/80">Facultative placement chat</p>
-              </div>
-              <Button variant="ghost" size="icon" className="text-primary-foreground hover:bg-primary-foreground/20" onClick={() => setIsCommunicationOpen(false)}>
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-            <div className="space-y-3 p-4">
-              <div className="rounded-lg bg-slate-100 p-3 text-sm">
-                <div className="mb-1 flex items-center gap-2 font-semibold">
-                  <User className="h-4 w-4" />
-                  Demo Reinsurer
+      {showFacInwardReinsuranceChat ? (
+        <>
+          <Button
+            type="button"
+            className="fixed bottom-6 right-6 z-40 gap-2 rounded-full shadow-lg"
+            onClick={() => setReinsuranceChatOpen(true)}
+          >
+            <MessageSquare className="h-4 w-4" />
+            Reinsurance Chat
+          </Button>
+          {reinsuranceChatOpen ? (
+            <div className="fixed bottom-20 right-6 z-50 w-[24rem] max-w-[calc(100vw-2rem)] rounded-xl border bg-white shadow-2xl">
+              <div className="flex items-center justify-between border-b bg-primary px-4 py-3 text-primary-foreground">
+                <div>
+                  <p className="font-semibold">Queries & Communication</p>
+                  <p className="text-xs text-primary-foreground/80">Facultative placement chat</p>
                 </div>
-                Please confirm if the{' '}
-                {requesterChatRole === 'insurer' ? 'ceding commission' : 'broker commission'} is firm at{' '}
-                {placement.commissionPercent}%.
-              </div>
-              <div className="ml-8 rounded-lg bg-primary/10 p-3 text-sm">
-                <div className="mb-1 font-semibold">
-                  {requesterChatRole === 'insurer' ? 'Demo Underwriter (Cedent)' : 'Demo Reinsurance Broker'}
-                </div>
-                {requesterChatRole === 'insurer'
-                  ? 'Yes — commission and requested share follow this referral quote and facultative instructions.'
-                  : 'Yes, commission and requested share are based on the attached quote form.'}
-              </div>
-              <div className="flex gap-2 pt-2">
-                <Input placeholder="Type a message..." />
-                <Button size="icon">
-                  <Send className="h-4 w-4" />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="text-primary-foreground hover:bg-primary-foreground/20"
+                  onClick={() => setReinsuranceChatOpen(false)}
+                >
+                  <X className="h-4 w-4" />
                 </Button>
               </div>
+              <div className="space-y-3 p-4">
+                <div className="rounded-lg bg-slate-100 p-3 text-sm">
+                  <div className="mb-1 flex items-center gap-2 font-semibold">
+                    <User className="h-4 w-4" />
+                    Demo Reinsurer
+                  </div>
+                  Please confirm if the{' '}
+                  {requesterChatRole === 'insurer' ? 'ceding commission' : 'broker commission'} is firm at{' '}
+                  {placement.commissionPercent}%.
+                </div>
+                <div className="ml-8 rounded-lg bg-primary/10 p-3 text-sm">
+                  <div className="mb-1 font-semibold">
+                    {requesterChatRole === 'insurer' ? 'Demo Underwriter (Cedent)' : 'Demo Reinsurance Requester'}
+                  </div>
+                  {requesterChatRole === 'insurer'
+                    ? 'Yes — commission and requested share follow this referral quote and facultative instructions.'
+                    : 'Yes, commission and requested share are based on the attached quote form.'}
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <Input placeholder="Type a message..." />
+                  <Button type="button" size="icon">
+                    <Send className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
             </div>
-          </div>
-        )}
-      </div>
+          ) : null}
+        </>
+      ) : null}
+
+      {brokerArrangeFacDraft ? (
+        <ArrangeFacultativeReinsuranceDialog
+          draft={brokerArrangeFacDraft}
+          updateDraft={setBrokerArrangeFacDraft}
+          totalSI={record.requestedCededSI}
+          grossPremium={record.premium}
+          currency="AED"
+          retentionAvailable={brokerFacArrangeRetentionAvailable}
+          reinsurers={brokerFacReinsurers}
+          onCommit={() => {
+            toast({
+              title: 'Facultative panel captured',
+              description: 'Outbound facultative details are recorded for this referral (demo).',
+            });
+          }}
+        />
+      ) : null}
 
       <Dialog
         open={addCewDialogOpen}

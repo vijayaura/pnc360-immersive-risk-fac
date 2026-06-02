@@ -1,16 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { FormattedNumberInput } from '@/components/ui/FormattedNumberInput';
 import {
@@ -32,6 +25,7 @@ import {
   Save,
   Plus,
   Trash2,
+  ArrowRight,
 } from 'lucide-react';
 import { useToast } from '@/shared/hooks/use-toast';
 import {
@@ -50,8 +44,25 @@ import {
   saveReinsuranceHandling,
   type TreatyAllocation,
   type TreatyReinsurerAllocation,
+  type TriggeredTreatyItem,
 } from '@/features/proposals/api/referrals';
-import { InsurerReferralFacultativeRequestsCard } from '@/features/referrals/components/InsurerReferralFacultativeRequestsCard';
+import {
+  facultativeRequestStatusBadgeClass,
+  matchFacultativeDemoTemplateByReinsurerName,
+  reinsurerSlugForDemoRow,
+} from '@/features/referrals/components/InsurerReferralFacultativeRequestsCard';
+import {
+  ArrangeFacultativeReinsuranceDialog,
+  type FacRow,
+  type FacultativeArrangeDraft,
+} from '@/features/referrals/components/ArrangeFacultativeReinsuranceDialog';
+import { FacultativeNewRequestDialog, type FacultativeNewParty } from '@/features/referrals/components/FacultativeNewRequestDialog';
+import {
+  FacOutreachRequestsSection,
+  createOutreachCaseFromParties,
+  type FacOutreachCaseState,
+} from '@/features/referrals/components/FacOutreachRequestsCard';
+import { completeCombinedFacBundle } from '@/features/referrals/utils/combinedFacRequestHistory';
 import { listReinsurers, type Reinsurer } from '@/features/reinsurers/api/reinsurers';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -485,6 +496,19 @@ const isMandatoryFac = (alloc: TreatyAllocation) =>
   alloc.treatyId === 'mandatory-facultative' ||
   alloc.treatyCode === 'FAC';
 
+/** Aligns with `isMandatoryFac` for triggered-treaty rows (no program treaty → hide manual extra retention). */
+function triggeredTreatyIsMandatoryFacOnly(t: TriggeredTreatyItem): boolean {
+  const st = t.treaty.structureType?.toLowerCase() ?? '';
+  const code = (t.treaty.treatyCode ?? '').toUpperCase();
+  const id = t.treaty.id;
+  return (
+    st.includes('mandatory facultative') ||
+    st.includes('facultative') ||
+    id === 'mandatory-facultative' ||
+    code === 'FAC'
+  );
+}
+
 const allocKey = (alloc: TreatyAllocation, index: number) =>
   `${alloc.coverId || 'all'}_${alloc.treatyId}_${index}`;
 
@@ -506,265 +530,6 @@ function computeEffectiveCession(
   return { grossPremium, effectiveCession, effectiveRetention, cessionPct };
 }
 
-// Mutable row type for fac panel (used both in component and parent save logic)
-export interface FacRow {
-  id: string; // local React key
-  reinsurerId: string; // org UUID (empty for manually-added rows)
-  name: string;
-  sharePercent: number;
-  commissionPercent: number;
-}
-
-interface FacLayerBreakdownSectionProps {
-  allocation: TreatyAllocation;
-  currency: string;
-  initialRows: FacRow[];
-  onRowsChange: (rows: FacRow[]) => void;
-  reinsurers: Reinsurer[];
-}
-
-function FacultativeLayerBreakdownSection({
-  allocation,
-  currency,
-  initialRows,
-  onRowsChange,
-  reinsurers,
-}: FacLayerBreakdownSectionProps) {
-  // Controlled by parent — no internal rows state
-  const rows = initialRows;
-
-  // Derived computed values from mutable rows
-  const effectivePanel = rows.map((r) => {
-    const risk = (allocation.cessionSumInsured * r.sharePercent) / 100;
-    const sharedPremium = (allocation.cessionAmount * r.sharePercent) / 100;
-    const commissionAmount = (sharedPremium * r.commissionPercent) / 100;
-    const ratePer = risk > 0 ? sharedPremium / risk : 0;
-    const rateAfterCommission = risk > 0 ? (sharedPremium - commissionAmount) / risk : 0;
-    return { ...r, risk, sharedPremium, commissionAmount, ratePer, rateAfterCommission };
-  });
-
-  const totalShare = rows.reduce((s, r) => s + r.sharePercent, 0);
-  const totalCommission = effectivePanel.reduce((s, r) => s + r.commissionAmount, 0);
-
-  const updateRows = (updated: FacRow[]) => {
-    onRowsChange(updated);
-  };
-
-  const updateRow = (id: string, patch: Partial<FacRow>) => {
-    updateRows(rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
-  };
-
-  const addRow = () => {
-    const newRow: FacRow = {
-      id: `new-${Date.now()}`,
-      reinsurerId: '',
-      name: '',
-      sharePercent: 0,
-      commissionPercent: 0,
-    };
-    updateRows([...rows, newRow]);
-  };
-
-  const removeRow = (id: string) => {
-    if (rows.length <= 1) return;
-    updateRows(rows.filter((r) => r.id !== id));
-  };
-
-  const shareWarning = Math.abs(totalShare - 100) > 0.01 && totalShare > 0;
-
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="text-base">{allocation.structureType}</CardTitle>
-            <CardDescription>{allocation.treatyCode}</CardDescription>
-          </div>
-          <Badge variant="outline" className="text-xs bg-amber-50 border-amber-200 text-amber-700">
-            Facultative
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        {/* Facultative reinsurers panel */}
-        <div className="overflow-x-auto">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-sm font-medium">Facultative reinsurers</p>
-            <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs" onClick={addRow}>
-              <Plus className="h-3.5 w-3.5" />
-              Add reinsurer
-            </Button>
-          </div>
-
-          {shareWarning && (
-            <p className="text-xs text-amber-600 mb-2">
-              Share total: {totalShare.toFixed(1)}% — must equal 100% before saving.
-            </p>
-          )}
-          {!shareWarning && totalShare > 0 && (
-            <p className="text-xs text-muted-foreground mb-2">
-              Share total: {totalShare.toFixed(1)}%
-            </p>
-          )}
-
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-muted-foreground text-xs">
-                <th className="text-left pb-2 font-medium">Reinsurer</th>
-                <th className="text-right pb-2 font-medium">Risk</th>
-                <th className="text-right pb-2 font-medium">Share %</th>
-                <th className="text-right pb-2 font-medium">Shared Premium</th>
-                <th className="text-right pb-2 font-medium">Comm. %</th>
-                <th className="text-right pb-2 font-medium">Commission</th>
-                <th className="text-right pb-2 font-medium">Rate %</th>
-                <th className="text-right pb-2 font-medium">Rate After Comm.</th>
-                <th className="pb-2" />
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {effectivePanel.map((r) => (
-                <tr key={r.id} className="hover:bg-muted/30 transition-colors">
-                  <td className="py-2 pr-2">
-                    {reinsurers.length > 0 ? (
-                      <Select
-                        value={r.name || undefined}
-                        onValueChange={(value) => {
-                          const selected = reinsurers.find((x) => x.name === value);
-                          updateRow(r.id, {
-                            reinsurerId: selected?.id ?? '',
-                            name: value,
-                          });
-                        }}
-                      >
-                        <SelectTrigger className="h-7 text-sm min-w-[160px]">
-                          <SelectValue placeholder="Select reinsurer" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {reinsurers.map((re) => (
-                            <SelectItem key={re.id} value={re.name}>
-                              {re.name}
-                              {re.grade ? ` (${re.grade})` : ''}
-                            </SelectItem>
-                          ))}
-                          {r.name && !reinsurers.some((re) => re.name === r.name) && (
-                            <SelectItem value={r.name}>{r.name} (custom)</SelectItem>
-                          )}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <Input
-                        className="h-7 text-sm min-w-[130px]"
-                        placeholder="Reinsurer name"
-                        value={r.name}
-                        onChange={(e) => updateRow(r.id, { name: e.target.value })}
-                      />
-                    )}
-                  </td>
-                  <td className="py-2 text-right tabular-nums pr-2">{fmtAED(r.risk, currency)}</td>
-                  <td className="py-2 text-right pr-2">
-                    <div className="flex items-center justify-end gap-1">
-                      <Input
-                        type="number"
-                        min={0}
-                        max={100}
-                        step={0.01}
-                        className="w-20 h-7 text-sm text-right"
-                        value={r.sharePercent}
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value);
-                          if (!isNaN(val) && val >= 0 && val <= 100)
-                            updateRow(r.id, { sharePercent: val });
-                        }}
-                      />
-                    </div>
-                  </td>
-                  <td className="py-2 text-right tabular-nums pr-2">
-                    {fmtAED(r.sharedPremium, currency)}
-                  </td>
-                  <td className="py-2 text-right pr-2">
-                    <div className="flex items-center justify-end gap-1">
-                      <Input
-                        type="number"
-                        min={0}
-                        max={100}
-                        className="w-20 h-7 text-sm text-right"
-                        value={r.commissionPercent}
-                        onChange={(e) => {
-                          const val = Number(e.target.value);
-                          if (!isNaN(val) && val >= 0 && val <= 100)
-                            updateRow(r.id, { commissionPercent: val });
-                        }}
-                      />
-                    </div>
-                  </td>
-                  <td className="py-2 text-right tabular-nums text-green-700 pr-2">
-                    {fmtAED(r.commissionAmount, currency)}
-                  </td>
-                  <td className="py-2 text-right tabular-nums pr-2">{(r.ratePer * 100).toFixed(2)}</td>
-                  <td className="py-2 text-right tabular-nums pr-2">
-                    {(r.rateAfterCommission * 100).toFixed(2)}
-                  </td>
-                  <td className="py-2 pl-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                      disabled={rows.length <= 1}
-                      onClick={() => removeRow(r.id)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="border-t font-semibold bg-muted/30">
-                <td className="pt-2.5 pb-1">Total</td>
-                <td className="pt-2.5 pb-1 text-right tabular-nums">
-                  {fmtAED(allocation.cessionSumInsured, currency)}
-                </td>
-                <td className="pt-2.5 pb-1 text-right tabular-nums">
-                  <span className={shareWarning ? 'text-amber-600' : ''}>
-                    {totalShare.toFixed(1)}%
-                  </span>
-                </td>
-                <td className="pt-2.5 pb-1 text-right tabular-nums">
-                  {fmtAED(allocation.cessionAmount, currency)}
-                </td>
-                <td />
-                <td className="pt-2.5 pb-1 text-right tabular-nums text-green-700">
-                  {fmtAED(totalCommission, currency)}
-                </td>
-                <td />
-                <td />
-                <td />
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-
-        {/* Summary */}
-        <p className="text-sm font-medium">Summary</p>
-        <div className="rounded-lg border bg-muted/20 p-4 space-y-2 text-sm">
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Commission on Cession</span>
-            <span className="font-medium tabular-nums text-green-700">
-              {fmtAED(totalCommission, currency)}
-            </span>
-          </div>
-          <div className="flex justify-between font-medium">
-            <span>Net Retention (after commission)</span>
-            <span className="tabular-nums">
-              {fmtAED(allocation.retentionAmount + totalCommission, currency)}
-            </span>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 function ReinsuranceHandlingPage() {
@@ -784,6 +549,26 @@ function ReinsuranceHandlingPage() {
   const policyInceptionDate = searchParams.get('policyInceptionDate') ?? undefined;
   const sumInsuredParam = searchParams.get('sumInsured');
   const grossPremiumParam = searchParams.get('grossPremium');
+  const coverIdsParam = searchParams.get('coverIds');
+  const combinedFacBundleId = searchParams.get('combinedFacBundleId');
+  const coverIdsList = useMemo(
+    () =>
+      coverIdsParam
+        ? [...new Set(coverIdsParam.split(',').map((s) => s.trim()).filter(Boolean))]
+        : [],
+    [coverIdsParam],
+  );
+  const handlingScopeKey =
+    coverIdsList.length > 0 ? coverIdsList.slice().sort().join('|') : coverId ?? '';
+  /** Prefer explicit multi-select list; else single coverId from URL (API accepts one cover). */
+  const handlingCoverIdForApi =
+    coverIdsList.length === 1 ? coverIdsList[0] : coverId;
+  const effectiveCoverIdSet =
+    coverIdsList.length > 0
+      ? new Set(coverIdsList)
+      : coverId
+        ? new Set([coverId])
+        : undefined;
 
   const [isDirty, setIsDirty] = useState(false);
   const [extraRetentionPct, setExtraRetentionPct] = useState<number>(0);
@@ -801,29 +586,37 @@ function ReinsuranceHandlingPage() {
     cededSumInsured: number;
     rows: FacRow[];
   }>>([]);
+  const [facOutreachCases, setFacOutreachCases] = useState<FacOutreachCaseState[]>([]);
   // Modal state: null = closed, object = draft being edited in modal
-  const [facModalDraft, setFacModalDraft] = useState<{
-    id: string;
-    cededSumInsured: number;
-    rows: FacRow[];
-    isNew: boolean; // true = creating, false = editing existing
-  } | null>(null);
-  const facModalDraftRef = useRef(facModalDraft);
-  facModalDraftRef.current = facModalDraft;
-  // Wrapper that keeps the ref in sync immediately (not waiting for re-render)
-  const updateFacModalDraft = useCallback(
-    (updater: React.SetStateAction<typeof facModalDraft>) => {
-      setFacModalDraft((prev) => {
-        const next = typeof updater === 'function' ? updater(prev) : updater;
-        facModalDraftRef.current = next;
-        return next;
-      });
-    },
-    [],
-  );
+  const [facModalDraft, setFacModalDraft] = useState<FacultativeArrangeDraft | null>(null);
+  const [facNewRequestOpen, setFacNewRequestOpen] = useState(false);
+  const updateFacModalDraft = useCallback((updater: React.SetStateAction<FacultativeArrangeDraft | null>) => {
+    setFacModalDraft(updater);
+  }, []);
+  const openArrangeFacModal = useCallback(() => {
+    const ts = Date.now();
+    updateFacModalDraft({
+      id: `fac-${ts}`,
+      cededSumInsured: 0,
+      rows: [
+        {
+          id: `new-${ts}`,
+          reinsurerId: '',
+          name: '',
+          sharePercent: 0,
+          commissionPercent: 0,
+        },
+      ],
+      isNew: true,
+      flow: 'need',
+    });
+  }, [updateFacModalDraft]);
   // Editing state for inline fac cards
   const [editingFacLayerId, setEditingFacLayerId] = useState<string | null>(null);
   const hasInitializedRef = useRef(false);
+  useEffect(() => {
+    hasInitializedRef.current = false;
+  }, [handlingScopeKey]);
   // Refs for scroll-to-section
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
   // Onboarded reinsurers for dropdown — try API first, fall back to context panel data
@@ -840,7 +633,7 @@ function ReinsuranceHandlingPage() {
     isFetching: contextFetching,
     error,
   } = useQuery({
-    queryKey: ['reinsurance-context', referralId, coverId, policyInceptionDate, appliedExtraRetPct],
+    queryKey: ['reinsurance-context', referralId, coverId, coverIdsParam, policyInceptionDate, appliedExtraRetPct],
     queryFn: () =>
       getReinsuranceContext(referralId!, {
         ...(policyInceptionDate ? { policyInceptionDate } : {}),
@@ -858,8 +651,12 @@ function ReinsuranceHandlingPage() {
     isLoading: handlingLoading,
     isFetching: handlingFetching,
   } = useQuery({
-    queryKey: ['reinsurance-handling', referralId, coverId],
-    queryFn: () => getReinsuranceHandling(referralId!, { coverId }),
+    queryKey: ['reinsurance-handling', referralId, handlingScopeKey],
+    queryFn: () =>
+      getReinsuranceHandling(
+        referralId!,
+        handlingCoverIdForApi ? { coverId: handlingCoverIdForApi } : undefined,
+      ),
     enabled: !!referralId,
     staleTime: 1000 * 60 * 5,
     retry: false,
@@ -870,7 +667,7 @@ function ReinsuranceHandlingPage() {
       saveReinsuranceHandling(referralId!, payload),
     onSuccess: () => {
       setIsDirty(false);
-      queryClient.invalidateQueries({ queryKey: ['reinsurance-handling', referralId, coverId] });
+      queryClient.invalidateQueries({ queryKey: ['reinsurance-handling', referralId, handlingScopeKey] });
       toast({
         title: 'Handling saved',
         description: 'Reinsurance handling decisions have been saved.',
@@ -888,15 +685,61 @@ function ReinsuranceHandlingPage() {
   });
 
   // Filter triggered treaties by coverId (kept for Treaty Details section)
-  const triggeredForCover = coverId
-    ? (context?.triggeredTreaties ?? []).filter((t) => t.coverId === coverId)
+  const triggeredForCover = effectiveCoverIdSet
+    ? (context?.triggeredTreaties ?? []).filter((t) => effectiveCoverIdSet.has(t.coverId))
     : (context?.triggeredTreaties ?? []);
 
   const grossPremium = context?.grossPremium ?? 0;
   const allAllocations: TreatyAllocation[] = context?.treatyAllocations ?? [];
-  const allocations: TreatyAllocation[] = coverId
-    ? allAllocations.filter((a) => a.coverId === coverId)
+  const allocations: TreatyAllocation[] = effectiveCoverIdSet
+    ? allAllocations.filter((a) => effectiveCoverIdSet.has(a.coverId))
     : allAllocations;
+
+  const hasTreatyProgramForExtraRetention = useMemo(
+    () =>
+      allocations.some((a) => !isMandatoryFac(a)) ||
+      triggeredForCover.some((t) => !triggeredTreatyIsMandatoryFacOnly(t)),
+    [allocations, triggeredForCover],
+  );
+
+  const effectiveExtraRetentionPct = hasTreatyProgramForExtraRetention ? extraRetentionPct : 0;
+
+  useEffect(() => {
+    if (!hasTreatyProgramForExtraRetention && (extraRetentionPct !== 0 || appliedExtraRetPct !== 0)) {
+      setExtraRetentionPct(0);
+      setAppliedExtraRetPct(0);
+    }
+  }, [hasTreatyProgramForExtraRetention, extraRetentionPct, appliedExtraRetPct]);
+
+  const retentionAvailableForOutreach = useMemo(() => {
+    const totalSI = context?.sumInsured ?? 0;
+    const treatyAllocatedSI = allocations.reduce((s, a) => s + a.allocatedSumInsured, 0);
+    const otherFacCededSI = userFacLayers
+      .filter((l) => l.cededSumInsured > 0)
+      .reduce((s, l) => s + l.cededSumInsured, 0);
+    const er = effectiveExtraRetentionPct;
+    return (
+      allocations.reduce((s, a) => s + a.retentionSumInsured, 0) +
+      totalSI * (er / 100) +
+      Math.max(0, totalSI * (1 - er / 100) - treatyAllocatedSI) -
+      otherFacCededSI
+    );
+  }, [context?.sumInsured, allocations, userFacLayers, effectiveExtraRetentionPct]);
+
+  const handleOutreachSent = useCallback(
+    (parties: FacultativeNewParty[]) => {
+      const sought = context?.sumInsured ?? (sumInsuredParam ? Number(sumInsuredParam) : 0);
+      setFacOutreachCases((prev) => [...prev, createOutreachCaseFromParties(parties, sought)]);
+      setIsDirty(true);
+      if (combinedFacBundleId) {
+        completeCombinedFacBundle(combinedFacBundleId, {
+          recipientCount: parties.length,
+          recipientNames: parties.map((p) => p.name),
+        });
+      }
+    },
+    [context?.sumInsured, sumInsuredParam, combinedFacBundleId],
+  );
 
   // Build reinsurer list: prefer API data, fall back to panel data from context
   const availableReinsurers: Reinsurer[] =
@@ -935,7 +778,7 @@ function ReinsuranceHandlingPage() {
 
     hasInitializedRef.current = true;
     const saved = savedHandling as (SavedHandling & { extraRetentionPercent?: number }) | null | undefined;
-    if (saved?.extraRetentionPercent) {
+    if (saved?.extraRetentionPercent && hasTreatyProgramForExtraRetention) {
       setExtraRetentionPct(saved.extraRetentionPercent);
       setAppliedExtraRetPct(saved.extraRetentionPercent);
     }
@@ -1034,7 +877,15 @@ function ReinsuranceHandlingPage() {
         };
       }));
     }
-  }, [allocations, savedHandling, isLoading, handlingLoading, handlingFetching]);
+  }, [
+    allocations,
+    savedHandling,
+    isLoading,
+    handlingLoading,
+    handlingFetching,
+    handlingScopeKey,
+    hasTreatyProgramForExtraRetention,
+  ]);
 
   // Navigation guard state
   const [showLeaveDialog, setShowLeaveDialog] = useState(false);
@@ -1275,9 +1126,14 @@ function ReinsuranceHandlingPage() {
       });
 
     saveMutation.mutate({
-      coverId: coverId ?? null,
+      coverId:
+        coverIdsList.length === 1
+          ? coverIdsList[0]
+          : coverIdsList.length > 1
+            ? null
+            : coverId ?? null,
       unitId: null,
-      extraRetentionPercent: extraRetentionPct,
+      extraRetentionPercent: effectiveExtraRetentionPct,
       layers: [...layersPayload, ...facSlipLayers],
     });
   };
@@ -1345,21 +1201,6 @@ function ReinsuranceHandlingPage() {
   const isMultiTreaty = allocations.length > 1;
   const programName = triggeredForCover[0]?.program?.treatyName ?? productName;
 
-  const coverSumInsuredForFac =
-    (context?.sumInsured != null && context.sumInsured > 0
-      ? context.sumInsured
-      : sumInsuredParam
-        ? Number(sumInsuredParam)
-        : 0) || 0;
-  const coverGrossPremiumForFac =
-    (grossPremium > 0 ? grossPremium : grossPremiumParam ? Number(grossPremiumParam) : 0) || 0;
-  let facProductLabel = productName;
-  try {
-    facProductLabel = decodeURIComponent(productName);
-  } catch {
-    /* keep productName */
-  }
-
   // Check if all fac layers have 100% share total
   const facShareValid = allocations.every((a, i) => {
     if (!isMandatoryFac(a)) return true;
@@ -1378,19 +1219,7 @@ function ReinsuranceHandlingPage() {
     sectionRefs.current[treatyCode]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  const insurerFacRequestsCard =
-    basePath === '/insurer' && referralId ? (
-      <InsurerReferralFacultativeRequestsCard
-        referralId={referralId}
-        currency={currency}
-        coverSumInsured={coverSumInsuredForFac}
-        coverGrossPremium={coverGrossPremiumForFac}
-        facultativeCededFromContext={context?.facultativeCeded ?? 0}
-        userFacSlipsCededSi={facSlipsCededSI}
-        productLabel={facProductLabel}
-        insuredLabel="Per referral schedule"
-      />
-    ) : null;
+  const showInsurerFacRequestColumns = basePath === '/insurer' && Boolean(referralId);
 
   // ── Loading ──
   if (isLoading) {
@@ -1484,118 +1313,19 @@ function ReinsuranceHandlingPage() {
       </div>
 
       <div className="container mx-auto max-w-6xl py-8 px-4 space-y-8">
-        {allocations.length === 0 ? (
-          <>
-            {/* ── Cover Breakdown card (no-treaty view) ──────────── */}
+            {/* ── Cover breakdown + overview + summary (single card) ── */}
             <Card className="border-primary bg-primary text-primary-foreground">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-primary-foreground">
-                  <div className="rounded-lg bg-primary-foreground/20 p-2">
+                <CardTitle className="flex items-start gap-3 text-primary-foreground">
+                  <div className="rounded-lg bg-primary-foreground/20 p-2 shrink-0">
                     <Layers className="h-4 w-4 text-primary-foreground" />
                   </div>
-                  Cover Breakdown
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {/* Reinsurance Summary */}
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-primary-foreground/70">Reinsurance Summary</h3>
-                <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { label: 'SUM INSURED', value: fmtAED(context?.sumInsured ?? 0, currency) },
-                    { label: 'GROSS PREMIUM', value: fmtAED(grossPremium, currency) },
-                    { label: 'CESSION (SI)', value: fmtAED(facSlipsCededSI, currency) },
-                    { label: 'RETENTION (SI)', value: fmtAED((context?.sumInsured ?? 0) - facSlipsCededSI, currency) },
-                    { label: 'COMMISSION', value: fmtAED(facSlipCommission, currency) },
-                    { label: 'NET PREMIUM RETENTION AFTER COMMISSION', value: fmtAED(grossPremium - facSlipCededPremium + facSlipCommission, currency) },
-                  ].map((item) => (
-                    <div key={item.label} className="rounded-lg border border-primary-foreground/20 bg-primary-foreground/10 p-3">
-                      <p className="text-[10px] font-medium uppercase tracking-wide text-primary-foreground/60">{item.label}</p>
-                      <p className="text-sm font-bold tabular-nums text-primary-foreground mt-1">{item.value}</p>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="border-t border-primary-foreground/20" />
-
-                {/* Extra Retention */}
-                <div className="rounded-lg bg-white p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-sm font-semibold text-gray-900">Extra Retention (Manual)</h3>
-                      <p className="text-xs text-muted-foreground">
-                        Retain a percentage of sum insured before treaty allocation
-                      </p>
-                    </div>
-                    <Button
-                      size="sm"
-                      disabled={extraRetentionPct === appliedExtraRetPct}
-                      onClick={() => setAppliedExtraRetPct(extraRetentionPct)}
-                    >
-                      {contextFetching && !isLoading ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        'Apply'
-                      )}
-                    </Button>
+                  <div className="min-w-0 space-y-1">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-primary-foreground/70">
+                      Cover Breakdown
+                    </p>
+                    <p className="text-lg font-semibold leading-tight tracking-tight">{programName}</p>
                   </div>
-                  <div className="grid grid-cols-3 gap-4 items-end">
-                    <div>
-                      <label className="text-xs font-medium text-gray-500">Retention %</label>
-                      <Input
-                        type="number"
-                        min={0}
-                        max={100}
-                        value={extraRetentionPct === 0 ? '' : extraRetentionPct}
-                        onChange={(e) => {
-                          const v = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0));
-                          setExtraRetentionPct(v);
-                          setIsDirty(true);
-                        }}
-                        placeholder="0"
-                        className="bg-white text-gray-900 border-gray-300"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium text-gray-500">Retained Amount</label>
-                      <div className="text-sm font-semibold mt-1 text-gray-900">
-                        {fmtAED((context?.sumInsured ?? 0) * (extraRetentionPct / 100), currency)}
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium text-gray-500">Effective SI for Treaties</label>
-                      <div className="text-sm font-semibold mt-1 text-gray-900">
-                        {fmtAED((context?.sumInsured ?? 0) * (1 - extraRetentionPct / 100), currency)}
-                      </div>
-                    </div>
-                  </div>
-                  {extraRetentionPct > 0 && (
-                    <div className="space-y-1.5">
-                      <div className="flex h-3 rounded-full overflow-hidden">
-                        <div className="bg-primary transition-all" style={{ width: `${extraRetentionPct}%` }} />
-                        <div className="bg-gray-200 transition-all" style={{ width: `${100 - extraRetentionPct}%` }} />
-                      </div>
-                      <div className="flex justify-between text-xs text-muted-foreground">
-                        <span>Extra Retention: {extraRetentionPct}%</span>
-                        <span>To Treaties: {100 - extraRetentionPct}%</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            {insurerFacRequestsCard}
-          </>
-        ) : (
-          <>
-            {/* ── Overview card ──────────────────────────────────── */}
-            <Card className="border-primary bg-primary text-primary-foreground">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-primary-foreground">
-                  <div className="rounded-lg bg-primary-foreground/20 p-2">
-                    <Layers className="h-4 w-4 text-primary-foreground" />
-                  </div>
-                  {programName}
                 </CardTitle>
                 <CardDescription className="text-primary-foreground/80">
                   Reinsurance Overview · Sum Insured: {fmtAED(context?.sumInsured ?? 0, currency)} ·
@@ -1610,6 +1340,38 @@ function ReinsuranceHandlingPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                {allocations.length === 0 && (
+                  <>
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-primary-foreground/70">
+                      Reinsurance Summary
+                    </h3>
+                    <div className="grid grid-cols-3 gap-3">
+                      {[
+                        { label: 'SUM INSURED', value: fmtAED(context?.sumInsured ?? 0, currency) },
+                        { label: 'GROSS PREMIUM', value: fmtAED(grossPremium, currency) },
+                        { label: 'CESSION (SI)', value: fmtAED(facSlipsCededSI, currency) },
+                        { label: 'RETENTION (SI)', value: fmtAED((context?.sumInsured ?? 0) - facSlipsCededSI, currency) },
+                        { label: 'COMMISSION', value: fmtAED(facSlipCommission, currency) },
+                        {
+                          label: 'NET PREMIUM RETENTION AFTER COMMISSION',
+                          value: fmtAED(grossPremium - facSlipCededPremium + facSlipCommission, currency),
+                        },
+                      ].map((item) => (
+                        <div
+                          key={item.label}
+                          className="rounded-lg border border-primary-foreground/20 bg-primary-foreground/10 p-3"
+                        >
+                          <p className="text-[10px] font-medium uppercase tracking-wide text-primary-foreground/60">
+                            {item.label}
+                          </p>
+                          <p className="mt-1 text-sm font-bold tabular-nums text-primary-foreground">{item.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="border-t border-primary-foreground/20" />
+                  </>
+                )}
+
                 <div
                   className={`grid gap-4 ${
                     allocations.length === 1 ? 'sm:grid-cols-1 max-w-sm' : 'sm:grid-cols-3'
@@ -1691,8 +1453,8 @@ function ReinsuranceHandlingPage() {
                     <span className="font-bold tabular-nums text-primary-foreground">
                       {fmtAED(
                         allocations.reduce((s, a) => s + a.retentionSumInsured, 0) +
-                        (context?.sumInsured ?? 0) * (extraRetentionPct / 100) +
-                        ((context?.sumInsured ?? 0) * (1 - extraRetentionPct / 100) -
+                        (context?.sumInsured ?? 0) * (effectiveExtraRetentionPct / 100) +
+                        ((context?.sumInsured ?? 0) * (1 - effectiveExtraRetentionPct / 100) -
                           allocations.reduce((s, a) => s + a.allocatedSumInsured, 0)) -
                         facSlipsCededSI,
                         currency,
@@ -1701,10 +1463,12 @@ function ReinsuranceHandlingPage() {
                   </div>
                 </div>
 
-                <div className="border-t border-primary-foreground/20" />
+                {hasTreatyProgramForExtraRetention && (
+                  <>
+                    <div className="border-t border-primary-foreground/20" />
 
-                {/* Extra Retention */}
-                <div className="rounded-lg bg-white p-4 space-y-3">
+                    {/* Extra Retention */}
+                    <div className="rounded-lg bg-white p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
                       <h3 className="text-sm font-semibold text-gray-900">Extra Retention (Manual)</h3>
@@ -1766,11 +1530,14 @@ function ReinsuranceHandlingPage() {
                       </div>
                     </div>
                   )}
-                </div>
+                    </div>
+                  </>
+                )}
               </CardContent>
             </Card>
 
-            {/* ── Per-layer breakdowns ────────────────────────────── */}
+            {/* ── Per-layer breakdowns (treaty program only) ──────── */}
+            {allocations.length > 0 && (
             <div className="space-y-6">
               <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
                 Treaty Breakdowns
@@ -1829,10 +1596,7 @@ function ReinsuranceHandlingPage() {
                 );
               })}
             </div>
-
-            {insurerFacRequestsCard}
-          </>
-        )}
+            )}
 
         {/* ── Treaty Allocations / Facultative (always visible) ── */}
         <div className="space-y-4">
@@ -1840,35 +1604,43 @@ function ReinsuranceHandlingPage() {
             <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
               Treaty Allocations
             </h2>
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-2"
-              onClick={() => {
-                updateFacModalDraft({
-                  id: `fac-${Date.now()}`,
-                  cededSumInsured: 0,
-                  rows: [{
-                    id: `new-${Date.now()}`,
-                    reinsurerId: '',
-                    name: '',
-                    sharePercent: 0,
-                    commissionPercent: 0,
-                  }],
-                  isNew: true,
-                });
-              }}
-            >
-              <Plus className="h-4 w-4" />
-              Need Facultative
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2"
+                onClick={() => setFacNewRequestOpen(true)}
+              >
+                <Plus className="h-4 w-4" />
+                Facultative New
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2"
+                onClick={() => openArrangeFacModal()}
+              >
+                <Plus className="h-4 w-4" />
+                Need Facultative
+              </Button>
+            </div>
           </div>
-          {allocations.length === 0 && userFacLayers.length === 0 && (
+          {allocations.length === 0 && userFacLayers.length === 0 && facOutreachCases.length === 0 && (
             <Card className="border-dashed">
               <CardContent className="py-6 text-center text-sm text-muted-foreground">
-                No treaties triggered. Use &quot;Need Facultative&quot; to arrange a case-by-case reinsurer panel.
+                No treaties triggered. Use &quot;Facultative New&quot; or &quot;Need Facultative&quot; to arrange a case-by-case reinsurer panel.
               </CardContent>
             </Card>
+          )}
+
+          {facOutreachCases.length > 0 && (
+            <FacOutreachRequestsSection
+              cases={facOutreachCases}
+              setCases={setFacOutreachCases}
+              currency={currency}
+              referralId={referralId ?? ''}
+              basePath={basePath}
+            />
           )}
 
           {/* ── Facultative Reinsurance Section ── */}
@@ -1931,7 +1703,12 @@ function ReinsuranceHandlingPage() {
                               Facultative
                             </Badge>
                           </CardTitle>
-                          <CardDescription>Case-by-case reinsurer panel (no treaty)</CardDescription>
+                          <CardDescription>
+                            Case-by-case reinsurer panel (no treaty)
+                            {showInsurerFacRequestColumns
+                              ? ' · Made facultative requests: use Status and View details on each reinsurer line below.'
+                              : ''}
+                          </CardDescription>
                         </div>
                         <div className="flex items-center gap-2">
                           {!isEditing ? (
@@ -2015,45 +1792,131 @@ function ReinsuranceHandlingPage() {
                       ) : (
                         <>
                           {/* Read-only reinsurer table */}
-                          <div className="overflow-x-auto">
-                            <p className="text-sm font-medium mb-2">Reinsurer Panel</p>
-                            <table className="w-full text-sm">
+                          <div className="overflow-x-auto rounded-lg border border-border/60">
+                            <p className="text-sm font-medium mb-2 px-1">Reinsurer Panel</p>
+                            <table
+                              className={`w-full border-collapse text-sm ${showInsurerFacRequestColumns ? 'min-w-[72rem]' : 'min-w-[42rem]'}`}
+                            >
                               <thead>
-                                <tr className="border-b text-muted-foreground text-xs">
-                                  <th className="text-left pb-2 font-medium">Reinsurer Name</th>
-                                  <th className="text-right pb-2 font-medium">Risk</th>
-                                  <th className="text-right pb-2 font-medium">Share %</th>
-                                  <th className="text-right pb-2 font-medium">Premium</th>
-                                  <th className="text-right pb-2 font-medium">Comm. %</th>
-                                  <th className="text-right pb-2 font-medium">Commission</th>
-                                  <th className="text-right pb-2 font-medium">Rate %</th>
-                                  <th className="text-right pb-2 font-medium">Rate After Comm.</th>
+                                <tr className="border-b border-border text-muted-foreground text-xs">
+                                  <th className="px-3 py-2 text-left font-medium whitespace-nowrap">
+                                    Reinsurer Name
+                                  </th>
+                                  <th className="px-3 py-2 text-right font-medium whitespace-nowrap">Risk</th>
+                                  <th className="px-3 py-2 text-right font-medium whitespace-nowrap">Share %</th>
+                                  <th className="px-3 py-2 text-right font-medium whitespace-nowrap">Premium</th>
+                                  <th className="px-3 py-2 text-right font-medium whitespace-nowrap">Comm. %</th>
+                                  <th className="px-3 py-2 text-right font-medium whitespace-nowrap">Commission</th>
+                                  <th className="px-3 py-2 text-right font-medium whitespace-nowrap">Rate %</th>
+                                  <th
+                                    className="px-3 py-2 text-right font-medium whitespace-nowrap"
+                                    title="Rate after commission"
+                                  >
+                                    Rate after comm.
+                                  </th>
+                                  {showInsurerFacRequestColumns ? (
+                                    <>
+                                      <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Status</th>
+                                      <th className="px-3 py-2 text-right font-medium whitespace-nowrap w-[1%]">
+                                        Action
+                                      </th>
+                                    </>
+                                  ) : null}
                                 </tr>
                               </thead>
-                              <tbody className="divide-y">
-                                {effectivePanel.map((r) => (
-                                  <tr key={r.id} className="hover:bg-muted/30 transition-colors">
-                                    <td className="py-2.5 font-medium">{r.name || '—'}</td>
-                                    <td className="py-2.5 text-right tabular-nums">{fmtAED(Math.round(r.risk), currency)}</td>
-                                    <td className="py-2.5 text-right tabular-nums">{r.sharePercent}%</td>
-                                    <td className="py-2.5 text-right tabular-nums">{fmtAED(Math.round(r.sharedPremium), currency)}</td>
-                                    <td className="py-2.5 text-right tabular-nums">{r.commissionPercent}%</td>
-                                    <td className="py-2.5 text-right tabular-nums text-green-700">{fmtAED(Math.round(r.commissionAmount), currency)}</td>
-                                    <td className="py-2.5 text-right tabular-nums">{(r.ratePer * 100).toFixed(2)}</td>
-                                    <td className="py-2.5 text-right tabular-nums">{(r.rateAfterCommission * 100).toFixed(2)}</td>
-                                  </tr>
-                                ))}
+                              <tbody className="divide-y divide-border">
+                                {effectivePanel.map((r) => {
+                                  const demoTpl = showInsurerFacRequestColumns
+                                    ? matchFacultativeDemoTemplateByReinsurerName(r.name || '')
+                                    : null;
+                                  return (
+                                    <tr key={r.id} className="hover:bg-muted/30 transition-colors">
+                                      <td className="px-3 py-2.5 font-medium whitespace-nowrap">{r.name || '—'}</td>
+                                      <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">
+                                        {fmtAED(Math.round(r.risk), currency)}
+                                      </td>
+                                      <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">
+                                        {r.sharePercent}%
+                                      </td>
+                                      <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">
+                                        {fmtAED(Math.round(r.sharedPremium), currency)}
+                                      </td>
+                                      <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">
+                                        {r.commissionPercent}%
+                                      </td>
+                                      <td className="px-3 py-2.5 text-right tabular-nums text-green-700 whitespace-nowrap">
+                                        {fmtAED(Math.round(r.commissionAmount), currency)}
+                                      </td>
+                                      <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">
+                                        {(r.ratePer * 100).toFixed(2)}
+                                      </td>
+                                      <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">
+                                        {(r.rateAfterCommission * 100).toFixed(2)}
+                                      </td>
+                                      {showInsurerFacRequestColumns && demoTpl && referralId ? (
+                                        <>
+                                          <td className="px-3 py-2.5 whitespace-nowrap align-middle">
+                                            <Badge
+                                              variant="outline"
+                                              className={facultativeRequestStatusBadgeClass(demoTpl.status)}
+                                            >
+                                              {demoTpl.status}
+                                            </Badge>
+                                          </td>
+                                          <td className="px-3 py-2.5 text-right whitespace-nowrap align-middle w-[1%]">
+                                            <Button
+                                              variant="outline"
+                                              size="sm"
+                                              className="gap-1.5 whitespace-nowrap"
+                                              onClick={() =>
+                                                navigate(
+                                                  `/insurer/referral/${referralId}/reinsurance/fac/${demoTpl.id}/reinsurer/${reinsurerSlugForDemoRow(demoTpl)}`,
+                                                  {
+                                                    state: {
+                                                      record: {
+                                                        ...demoTpl,
+                                                        requestedCededSI: Math.round(r.risk),
+                                                        premium: Math.round(r.sharedPremium),
+                                                      },
+                                                    },
+                                                  },
+                                                )
+                                              }
+                                            >
+                                              View details
+                                              <ArrowRight className="h-3.5 w-3.5 shrink-0" />
+                                            </Button>
+                                          </td>
+                                        </>
+                                      ) : null}
+                                    </tr>
+                                  );
+                                })}
                               </tbody>
                               <tfoot>
-                                <tr className="border-t font-semibold bg-muted/30">
-                                  <td className="pt-2.5 pb-1">Total</td>
-                                  <td className="pt-2.5 pb-1 text-right tabular-nums">{fmtAED(Math.round(totalRisk), currency)}</td>
-                                  <td className="pt-2.5 pb-1 text-right tabular-nums">{totalShare.toFixed(2)}%</td>
-                                  <td className="pt-2.5 pb-1 text-right tabular-nums">{fmtAED(Math.round(totalPremium), currency)}</td>
-                                  <td />
-                                  <td className="pt-2.5 pb-1 text-right tabular-nums text-green-700">{fmtAED(Math.round(totalCommission), currency)}</td>
-                                  <td />
-                                  <td />
+                                <tr className="border-t border-border font-semibold bg-muted/30">
+                                  <td className="px-3 py-2">Total</td>
+                                  <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">
+                                    {fmtAED(Math.round(totalRisk), currency)}
+                                  </td>
+                                  <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">
+                                    {totalShare.toFixed(2)}%
+                                  </td>
+                                  <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">
+                                    {fmtAED(Math.round(totalPremium), currency)}
+                                  </td>
+                                  <td className="px-3 py-2" />
+                                  <td className="px-3 py-2 text-right tabular-nums text-green-700 whitespace-nowrap">
+                                    {fmtAED(Math.round(totalCommission), currency)}
+                                  </td>
+                                  <td className="px-3 py-2" />
+                                  <td className="px-3 py-2" />
+                                  {showInsurerFacRequestColumns ? (
+                                    <>
+                                      <td className="px-3 py-2" />
+                                      <td className="px-3 py-2" />
+                                    </>
+                                  ) : null}
                                 </tr>
                               </tfoot>
                             </table>
@@ -2089,178 +1952,50 @@ function ReinsuranceHandlingPage() {
         {facModalDraft && (() => {
           const draft = facModalDraft;
           const totalSI = context?.sumInsured ?? 0;
-          const cededPremium = totalSI > 0 ? grossPremium * (draft.cededSumInsured / totalSI) : 0;
-
-          // Retention SI available for facultative
           const treatyAllocatedSI = allocations.reduce((s, a) => s + a.allocatedSumInsured, 0);
           const otherFacCededSI = userFacLayers
             .filter((l) => l.id !== draft.id && l.cededSumInsured > 0)
             .reduce((s, l) => s + l.cededSumInsured, 0);
           const retentionAvailable =
             allocations.reduce((s, a) => s + a.retentionSumInsured, 0) +
-            totalSI * (extraRetentionPct / 100) +
-            Math.max(0, totalSI * (1 - extraRetentionPct / 100) - treatyAllocatedSI) -
+            totalSI * (effectiveExtraRetentionPct / 100) +
+            Math.max(0, totalSI * (1 - effectiveExtraRetentionPct / 100) - treatyAllocatedSI) -
             otherFacCededSI;
 
-          const facAlloc: TreatyAllocation = {
-            treatyId: `user-fac-${draft.id}`,
-            structureType: 'Facultative',
-            treatyCode: 'FAC',
-            treatyName: 'Facultative',
-            allocatedSumInsured: draft.cededSumInsured,
-            allocatedPremium: cededPremium,
-            percentOfTotal: totalSI > 0 ? (draft.cededSumInsured / totalSI) * 100 : 0,
-            retentionPercent: 0,
-            cessionPercent: 100,
-            retentionAmount: 0,
-            cessionAmount: cededPremium,
-            retentionSumInsured: 0,
-            cessionSumInsured: draft.cededSumInsured,
-            commissionPercent: 0,
-            commissionAmount: 0,
-            netRetentionAfterCommission: 0,
-            technicalRate: 0,
-            isFacultative: true,
-            reinsurerBreakdown: [],
-          };
-          const totalShare = draft.rows.reduce((s, r) => s + r.sharePercent, 0);
-          const shareValid = Math.abs(totalShare - 100) <= 0.01;
           return (
-            <Dialog open onOpenChange={(open) => { if (!open) updateFacModalDraft(null); }}>
-              <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle className="flex items-center gap-2">
-                    <Shield className="h-5 w-5" />
-                    Arrange Facultative Reinsurance
-                  </DialogTitle>
-                  <DialogDescription>
-                    Case-by-case reinsurer panel. Enter the ceded sum insured and the reinsurers taking a share. Premium auto-derives from SI.
-                  </DialogDescription>
-                </DialogHeader>
-
-                {/* Retention SI Available banner */}
-                {retentionAvailable > 0 && (
-                  <div className="rounded-md border bg-muted/30 px-4 py-3 flex items-center justify-between">
-                    <span className="text-sm font-medium">Retention SI Available for Facultative</span>
-                    <span className="text-sm font-bold tabular-nums">{fmtAED(Math.round(retentionAvailable), currency)}</span>
-                  </div>
-                )}
-
-                {/* Ceded SI + Ceded Premium */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium">Ceded SI</span>
-                    <FormattedNumberInput
-                      allowDecimals={false}
-                      allowEmpty
-                      className="w-48 h-9 text-right tabular-nums"
-                      value={draft.cededSumInsured || undefined}
-                      onChange={(v) => {
-                        const newVal = v ?? 0;
-                        updateFacModalDraft((prev) => prev ? { ...prev, cededSumInsured: newVal } : prev);
-                      }}
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-muted-foreground">Ceded Premium (derived)</span>
-                    <span className="text-sm font-semibold tabular-nums">{fmtAED(Math.round(cededPremium), currency)}</span>
-                  </div>
-                </div>
-                {/* Validation: Ceded SI exceeds available */}
-                {retentionAvailable > 0 && draft.cededSumInsured > retentionAvailable && (
-                  <p className="text-xs text-destructive">
-                    Ceded SI ({fmtAED(draft.cededSumInsured, currency)}) exceeds available retention ({fmtAED(Math.round(retentionAvailable), currency)}).
-                  </p>
-                )}
-
-                {/* Reinsurer Panel */}
-                <FacultativeLayerBreakdownSection
-                  allocation={facAlloc}
-                  currency={currency}
-                  initialRows={draft.rows}
-                  onRowsChange={(rows) => {
-                    updateFacModalDraft((prev) => prev ? { ...prev, rows } : prev);
-                  }}
-                  reinsurers={availableReinsurers}
-                />
-
-                {/* Footer buttons */}
-                <div className="flex justify-end gap-3 pt-4 border-t">
-                  <Button
-                    variant="outline"
-                    onClick={() => updateFacModalDraft(null)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      // Read the LATEST draft from the ref to avoid stale closure
-                      const latestDraft = facModalDraftRef.current;
-                      if (!latestDraft) return;
-
-                      // Validation 1: Ceded SI > 0
-                      if (!latestDraft.cededSumInsured || latestDraft.cededSumInsured <= 0) {
-                        toast({ title: 'Ceded SI required', description: 'Please enter a Ceded Sum Insured greater than 0.', variant: 'destructive' });
-                        return;
-                      }
-                      // Validation 2: Ceded SI must not exceed available retention
-                      if (retentionAvailable > 0 && latestDraft.cededSumInsured > retentionAvailable) {
-                        toast({ title: 'Ceded SI exceeds available retention', description: `Ceded SI (${fmtAED(latestDraft.cededSumInsured, currency)}) exceeds the available retention (${fmtAED(Math.round(retentionAvailable), currency)}).`, variant: 'destructive' });
-                        return;
-                      }
-                      // Validation 3: Every row must have a reinsurer selected
-                      if (latestDraft.rows.some((r) => !r.name.trim())) {
-                        toast({ title: 'Reinsurer required', description: 'Please select a reinsurer for every row in the panel.', variant: 'destructive' });
-                        return;
-                      }
-                      // Validation 4: Every row must have share % > 0
-                      if (latestDraft.rows.some((r) => !(r.sharePercent > 0))) {
-                        toast({ title: 'Share % required', description: 'Every reinsurer must have a Share % greater than 0.', variant: 'destructive' });
-                        return;
-                      }
-                      // Validation 5: Commission % ≤ 100
-                      if (latestDraft.rows.some((r) => r.commissionPercent > 100)) {
-                        toast({ title: 'Invalid commission', description: 'Commission % cannot exceed 100%.', variant: 'destructive' });
-                        return;
-                      }
-                      // Validation 6: Total share must equal 100%
-                      const latestTotalShare = latestDraft.rows.reduce((s, r) => s + r.sharePercent, 0);
-                      const latestShareValid = Math.abs(latestTotalShare - 100) <= 0.01;
-                      if (!latestShareValid) {
-                        toast({ title: 'Invalid share allocation', description: `Panel share total is ${latestTotalShare.toFixed(2)}%. It must equal 100%.`, variant: 'destructive' });
-                        return;
-                      }
-                      // Soft warning: high commission
-                      if (latestDraft.rows.some((r) => r.commissionPercent > 40)) {
-                        toast({ title: 'High commission warning', description: 'One or more reinsurers have commission above 40%.' });
-                      }
-                      // Soft warning: duplicate reinsurer
-                      const nameSet = new Set<string>();
-                      if (latestDraft.rows.some((r) => { if (r.name && nameSet.has(r.name)) return true; if (r.name) nameSet.add(r.name); return false; })) {
-                        toast({ title: 'Duplicate reinsurer warning', description: 'The same reinsurer appears more than once on this panel.' });
-                      }
-                      // Commit latest draft to userFacLayers
-                      const { isNew, ...layerData } = latestDraft;
-                      if (isNew) {
-                        setUserFacLayers((prev) => [...prev, layerData]);
-                      } else {
-                        setUserFacLayers((prev) =>
-                          prev.map((l) => l.id === layerData.id ? layerData : l),
-                        );
-                      }
-                      setIsDirty(true);
-                      updateFacModalDraft(null);
-                    }}
-                    className="gap-2"
-                  >
-                    <Plus className="h-4 w-4" />
-                    Add Facultative
-                  </Button>
-                </div>
-              </DialogContent>
-            </Dialog>
+            <ArrangeFacultativeReinsuranceDialog
+              draft={draft}
+              updateDraft={updateFacModalDraft}
+              totalSI={totalSI}
+              grossPremium={grossPremium}
+              currency={currency}
+              retentionAvailable={retentionAvailable}
+              reinsurers={availableReinsurers}
+              onCommit={(layerData, isNew) => {
+                if (isNew) {
+                  setUserFacLayers((prev) => [...prev, layerData]);
+                } else {
+                  setUserFacLayers((prev) => prev.map((l) => (l.id === layerData.id ? layerData : l)));
+                }
+                setIsDirty(true);
+              }}
+            />
           );
         })()}
+
+        <FacultativeNewRequestDialog
+          open={facNewRequestOpen}
+          onOpenChange={setFacNewRequestOpen}
+          referralId={referralId ?? ''}
+          quoteId={quoteId || undefined}
+          productName={productName}
+          coverTitle={coverTitle}
+          sumInsured={context?.sumInsured ?? (sumInsuredParam ? Number(sumInsuredParam) : 0)}
+          grossPremium={grossPremium}
+          currency={currency}
+          retentionAvailable={retentionAvailableForOutreach}
+          onOutreachSent={handleOutreachSent}
+        />
 
       </div>
     </div>

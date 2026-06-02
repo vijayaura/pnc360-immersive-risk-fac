@@ -24,6 +24,35 @@ export interface ReinsuranceBroker {
   status: 'active' | 'inactive' | string;
   adminEmail?: string;
   adminName?: string;
+  facultativeTreaty?: BrokerFacultativeTreatyConfig;
+  facilityIntelligence?: BrokerFacilityIntelligence;
+}
+
+export interface BrokerTeamContact {
+  name?: string;
+  email?: string;
+  phone?: string;
+}
+
+export interface BrokerFacultativeTreatyConfig {
+  supportsFacultative?: boolean;
+  supportsTreaty?: boolean;
+  separateTeamsForBoth?: boolean;
+  facultativeTeam?: BrokerTeamContact;
+  treatyTeam?: BrokerTeamContact;
+}
+
+export interface BrokerRegionalConnection {
+  id: string;
+  region: string;
+  regionLabel: string;
+  reinsurers: string[];
+}
+
+export interface BrokerFacilityIntelligence {
+  brokerFacilities?: string[];
+  preferredMarkets?: string[];
+  regionalConnections?: BrokerRegionalConnection[];
 }
 
 export interface ListReinsuranceBrokersResponse {
@@ -50,6 +79,8 @@ export interface CreateReinsuranceBrokerRequest {
   operatingZones?: Array<{ id: string; value: string; label: string; regionId: string; active: boolean }>;
   adminEmail?: string;
   adminName?: string;
+  facultativeTreaty?: BrokerFacultativeTreatyConfig;
+  facilityIntelligence?: BrokerFacilityIntelligence;
 }
 
 export interface UpdateReinsuranceBrokerRequest {
@@ -66,6 +97,8 @@ export interface UpdateReinsuranceBrokerRequest {
   operatingZones?: Array<{ id: string; value: string; label: string; regionId: string; active: boolean }>;
   adminEmail?: string;
   adminName?: string;
+  facultativeTreaty?: BrokerFacultativeTreatyConfig;
+  facilityIntelligence?: BrokerFacilityIntelligence;
 }
 
 export interface UploadReinsuranceBrokerLogoResponse {
@@ -125,6 +158,8 @@ interface ReinsuranceBrokerDTO {
     regions: OperatingLocationDto[];
     zones: OperatingLocationDto[];
   };
+  facultativeTreaty?: BrokerFacultativeTreatyConfig;
+  facilityIntelligence?: BrokerFacilityIntelligence;
 }
 
 interface ListReinsuranceBrokersDTOResponse {
@@ -178,6 +213,8 @@ function mapReinsuranceBroker(dto: ReinsuranceBrokerDTO): ReinsuranceBroker {
     status: (dto.status ?? '').toLowerCase() as 'active' | 'inactive',
     adminEmail: dto.adminEmail ?? dto.contact?.adminEmail,
     adminName: dto.adminName,
+    facultativeTreaty: dto.facultativeTreaty,
+    facilityIntelligence: dto.facilityIntelligence,
   };
 }
 
@@ -229,6 +266,8 @@ export async function createReinsuranceBroker(
       operatingZones: body.operatingZones,
       adminEmail: body.adminEmail,
       adminName: body.adminName,
+      facultativeTreaty: body.facultativeTreaty,
+      facilityIntelligence: body.facilityIntelligence,
       status: 'ACTIVE',
     },
   );
@@ -253,6 +292,8 @@ export async function updateReinsuranceBroker(
     operatingZones: body.operatingZones,
     adminEmail: body.adminEmail,
     adminName: body.adminName,
+    facultativeTreaty: body.facultativeTreaty,
+    facilityIntelligence: body.facilityIntelligence,
   };
   await apiPatch<ReinsuranceBrokerDTO>(`/reinsurance-broker-management/${brokerId}`, payload);
   return { message: 'Reinsurance broker updated successfully' };

@@ -7,14 +7,39 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { facultativeReferrals as facRowTemplates } from '@/features/reinsurer-brokers/data/mockData';
 
-const statusClass = (status: string) => {
+export function facultativeRequestStatusBadgeClass(status: string) {
   const normalized = status.toLowerCase();
   if (normalized.includes('bound') || normalized.includes('active')) return 'bg-green-50 text-green-700 border-green-200';
   if (normalized.includes('review') || normalized.includes('shared')) return 'bg-blue-50 text-blue-700 border-blue-200';
   return 'bg-yellow-50 text-yellow-700 border-yellow-200';
-};
+}
 
-function reinsurerSlugForDemoRow(row: (typeof facRowTemplates)[number]): string {
+/** Map a facultative panel reinsurer line to a demo facultative request row for navigation and status. */
+export function matchFacultativeDemoTemplateByReinsurerName(
+  panelName: string,
+): (typeof facRowTemplates)[number] {
+  const n = panelName.trim().toLowerCase();
+  if (!n) return facRowTemplates[0];
+
+  const falcon = facRowTemplates.find((t) => t.reinsurer.toLowerCase().includes('falcon'));
+  if (falcon && n.includes('falcon')) return falcon;
+
+  const global = facRowTemplates.find((t) => t.reinsurer.toLowerCase().includes('global'));
+  if (global && n.includes('global')) return global;
+
+  if (n.includes('partner')) {
+    const demo = facRowTemplates.find((t) => t.reinsurer.toLowerCase().includes('demo'));
+    if (demo) return demo;
+  }
+
+  for (const t of facRowTemplates) {
+    const r = t.reinsurer.toLowerCase();
+    if (r.includes(n) || (r.split(/\s+/)[0] && n.includes(r.split(/\s+/)[0] ?? ''))) return t;
+  }
+  return facRowTemplates[0];
+}
+
+export function reinsurerSlugForDemoRow(row: (typeof facRowTemplates)[number]): string {
   const r = row.reinsurer.toLowerCase();
   if (r.includes('falcon')) return 'falcon-re';
   if (r.includes('global')) return 'global-re';
@@ -117,7 +142,7 @@ export function InsurerReferralFacultativeRequestsCard({
                   <td className="px-4 py-3">{row.riskId}</td>
                   <td className="px-4 py-3">{row.reinsurer}</td>
                   <td className="px-4 py-3">
-                    <Badge variant="outline" className={statusClass(row.status)}>
+                    <Badge variant="outline" className={facultativeRequestStatusBadgeClass(row.status)}>
                       {row.status}
                     </Badge>
                   </td>

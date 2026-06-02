@@ -93,14 +93,14 @@ const sidebarItems = [
         icon: LayoutDashboard,
     },
     {
-        title: 'Reinsurance Management',
+        title: 'Reinsurers',
         url: '/insurer/reinsurer-management',
         icon: Network,
         show: true,
         navMatchPrefix: '/insurer/reinsurer-management',
     },
     {
-        title: 'User Management',
+        title: 'Users',
         id: 'insurerBrokerAssignments',
         url: '/insurer/user-management',
         icon: Users,
@@ -129,7 +129,7 @@ const sidebarItems = [
         show: true,
     },
     {
-        title: 'Endorsements Management',
+        title: 'Endorsements',
         id: 'endorsementsManagement',
         url: '/insurer/endorsements',
         icon: FileEdit,

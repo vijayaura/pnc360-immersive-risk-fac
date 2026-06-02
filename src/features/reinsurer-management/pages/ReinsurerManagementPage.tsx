@@ -17,14 +17,15 @@ import { listReinsurancePolicies, fetchReinsuranceSummary, listReinsuranceProduc
 import type { ReinsurerPolicyRecord, ReinsuranceSummary } from '../types';
 import { ReinsurerTable } from '../components/ReinsurerTable';
 import { formatCurrencyCompact } from '@/shared/utils/lib-utils';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import FacInCasesTab from '@/features/insurers/components/InsurerDashboard/FacInCasesTab';
-import { InsurerFacOutboundRequestsDashboard } from '../components/InsurerFacOutboundRequestsDashboard';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const PAGE_SIZE = 5;
 
+type ReinsuranceManagementTab = 'fac-out' | 'treaty';
+
 export default function ReinsurerManagementPage() {
   const navigate = useNavigate();
+  const [managementTab, setManagementTab] = useState<ReinsuranceManagementTab>('fac-out');
   const [policies, setPolicies] = useState<ReinsurerPolicyRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchInput, setSearchInput] = useState('');
@@ -139,21 +140,35 @@ export default function ReinsurerManagementPage() {
         <div>
           <h1 className="text-2xl font-bold text-foreground">Reinsurance Management</h1>
           <p className="text-sm text-muted-foreground">
-            Manage reinsurance for bound policies
+            Manage facultative outwards and treaty reinsurance.{' '}
+            <span className="font-medium text-foreground">Facultative In</span> cases live on the main{' '}
+            <span className="font-medium text-foreground">Dashboard</span> (Facultative In tab).
           </p>
         </div>
 
-        <Tabs defaultValue="treaty" className="w-full space-y-6">
-          <TabsList className="grid w-full max-w-md grid-cols-2 h-10 bg-muted/60 p-1">
+        <Tabs
+          value={managementTab}
+          onValueChange={(v) => setManagementTab(v as ReinsuranceManagementTab)}
+          className="w-full space-y-6"
+        >
+          <TabsList className="grid h-10 w-full max-w-2xl grid-cols-2 bg-muted/60 p-1">
+            <TabsTrigger value="fac-out" className="text-sm">
+              Facultative Out
+            </TabsTrigger>
             <TabsTrigger value="treaty" className="text-sm">
               Treaty
             </TabsTrigger>
-            <TabsTrigger value="facultative" className="text-sm">
-              Facultative
-            </TabsTrigger>
           </TabsList>
+        </Tabs>
 
-          <TabsContent value="treaty" className="mt-0 space-y-6">
+        {managementTab === 'fac-out' ? (
+          <div className="mt-0 space-y-4" role="tabpanel" aria-label="Facultative out">
+            <InsurerFacOutboundRequestsDashboard returnTo="/insurer/reinsurer-management" />
+          </div>
+        ) : null}
+
+        {managementTab === 'treaty' ? (
+          <div className="mt-0 space-y-6" role="tabpanel" aria-label="Treaty">
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
           {[
             { label: 'Total Policies', icon: Shield, value: summary?.totalPolicies, isCurrency: false, iconBg: 'bg-primary/10', iconColor: 'text-primary' },
@@ -270,27 +285,8 @@ export default function ReinsurerManagementPage() {
             </div>
           </CardContent>
         </Card>
-          </TabsContent>
-
-          <TabsContent value="facultative" className="mt-0 space-y-4">
-            <Tabs defaultValue="fac-in" className="w-full">
-              <TabsList className="grid h-10 w-full max-w-lg grid-cols-2 bg-muted/60 p-1">
-                <TabsTrigger value="fac-in" className="text-sm">
-                  Facultative In
-                </TabsTrigger>
-                <TabsTrigger value="fac-out" className="text-sm">
-                  Facultative Out
-                </TabsTrigger>
-              </TabsList>
-              <TabsContent value="fac-in" className="mt-4">
-                <FacInCasesTab />
-              </TabsContent>
-              <TabsContent value="fac-out" className="mt-4">
-                <InsurerFacOutboundRequestsDashboard />
-              </TabsContent>
-            </Tabs>
-          </TabsContent>
-        </Tabs>
+          </div>
+        ) : null}
       </div>
     </div>
   );

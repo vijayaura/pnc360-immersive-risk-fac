@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { BarChart3, LayoutDashboard, LogOut, Network, ShieldCheck } from 'lucide-react';
+import { BarChart3, LayoutDashboard, LogOut, ShieldCheck } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -24,11 +24,6 @@ const sidebarItems = [
     title: 'Dashboard',
     url: '/reinsurer/dashboard',
     icon: LayoutDashboard,
-  },
-  {
-    title: 'Reinsurance Policies',
-    url: '/reinsurer/policies',
-    icon: Network,
   },
   {
     title: 'Portfolio Analytics',

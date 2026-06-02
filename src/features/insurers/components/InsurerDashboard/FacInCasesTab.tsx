@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, ShieldCheck } from 'lucide-react';
 
@@ -6,7 +6,6 @@ import { TableSearchFilter, type FilterConfig } from '@/components/shared/TableS
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { facultativePolicies, facultativeReferrals } from '@/features/reinsurer-brokers/data/mockData';
 import { useTableSearch } from '@/shared/hooks/useTableSearch';
 
@@ -29,6 +28,8 @@ export interface FacInCasesTabProps {
   referralBasePath?: string;
   /** When true, omit the summary metric row (e.g. parent renders it above sibling tabs). */
   hideSummary?: boolean;
+  /** When set, detail "Back" returns here (e.g. Reinsurance Management). */
+  returnTo?: string;
 }
 
 /** Open Referrals / Bound Policies / Requested Ceded SI / Premium — shared with reinsurer dashboard layout. */
@@ -68,58 +69,25 @@ export function FacInCasesSummaryCards() {
 }
 
 /**
- * Matches the facultative Referrals / Policies experience from the reinsurer broker dashboard
- * (summary cards + Facultative Inwards), with configurable navigation prefix.
+ * Facultative inbound referrals list (search, filters, View) with optional summary cards above.
+ * Navigation target is controlled via `referralBasePath`.
  */
 export default function FacInCasesTab({
   referralBasePath = '/insurer/fac-in-cases',
   hideSummary = false,
+  returnTo,
 }: FacInCasesTabProps) {
   const navigate = useNavigate();
-  const [recordsTab, setRecordsTab] = useState<'referrals' | 'policies'>('referrals');
 
   const referralsSearch = useTableSearch({
     data: facultativeReferrals,
     searchableFields: ['requestId', 'riskId', 'insured', 'product', 'status', 'reinsurer', 'submittedDate'],
   });
 
-  const policiesSearch = useTableSearch({
-    data: facultativePolicies,
-    searchableFields: ['policyId', 'riskId', 'insured', 'product', 'status', 'reinsurer', 'inception'],
-  });
-
-  const activeSearch = recordsTab === 'referrals' ? referralsSearch : policiesSearch;
-
   const referralFilters = useMemo((): FilterConfig[] => {
     const statusOpts = uniqueSorted(facultativeReferrals.map((r) => r.status));
     const productOpts = uniqueSorted(facultativeReferrals.map((r) => r.product));
     const reinsurerOpts = uniqueSorted(facultativeReferrals.map((r) => r.reinsurer));
-    return [
-      {
-        key: 'status',
-        label: 'Status',
-        type: 'select',
-        options: statusOpts.map((v) => ({ value: v, label: v })),
-      },
-      {
-        key: 'product',
-        label: 'Product',
-        type: 'select',
-        options: productOpts.map((v) => ({ value: v, label: v })),
-      },
-      {
-        key: 'reinsurer',
-        label: 'Reinsurer',
-        type: 'select',
-        options: reinsurerOpts.map((v) => ({ value: v, label: v })),
-      },
-    ];
-  }, []);
-
-  const policyFilters = useMemo((): FilterConfig[] => {
-    const statusOpts = uniqueSorted(facultativePolicies.map((r) => r.status));
-    const productOpts = uniqueSorted(facultativePolicies.map((r) => r.product));
-    const reinsurerOpts = uniqueSorted(facultativePolicies.map((r) => r.reinsurer));
     return [
       {
         key: 'status',
@@ -155,116 +123,68 @@ export default function FacInCasesTab({
                 Facultative Inwards
               </CardTitle>
               <CardDescription>
-                Search across facultative requests, slips, and bound policy records.
+                Search and open facultative inbound referrals (requests and placement status).
               </CardDescription>
             </div>
           </div>
         </CardHeader>
         <CardContent>
           <TableSearchFilter
-            searchTerm={activeSearch.searchTerm}
-            onSearchChange={activeSearch.setSearchTerm}
-            searchPlaceholder={
-              recordsTab === 'referrals'
-                ? 'Search request, risk, insured, reinsurer…'
-                : 'Search policy, risk, insured, reinsurer…'
-            }
-            filters={recordsTab === 'referrals' ? referralFilters : policyFilters}
-            activeFilters={activeSearch.filters}
-            onFilterChange={activeSearch.updateFilter}
-            onClearFilters={activeSearch.clearFilters}
+            searchTerm={referralsSearch.searchTerm}
+            onSearchChange={referralsSearch.setSearchTerm}
+            searchPlaceholder="Search request, risk, insured, reinsurer…"
+            filters={referralFilters}
+            activeFilters={referralsSearch.filters}
+            onFilterChange={referralsSearch.updateFilter}
+            onClearFilters={referralsSearch.clearFilters}
             className="mb-4"
           />
-          <Tabs
-            value={recordsTab}
-            onValueChange={(v) => setRecordsTab(v as 'referrals' | 'policies')}
-            className="space-y-4"
-          >
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="referrals">Referrals</TabsTrigger>
-              <TabsTrigger value="policies">Policies</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="referrals" className="mt-0">
-              <div className="overflow-x-auto rounded-lg border bg-white">
-                <table className="w-full min-w-[68rem] text-sm">
-                  <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    <tr>
-                      <th className="px-4 py-3">Request ID</th>
-                      <th className="px-4 py-3">Risk ID</th>
-                      <th className="px-4 py-3">Insured</th>
-                      <th className="px-4 py-3">Product</th>
-                      <th className="px-4 py-3">Status</th>
-                      <th className="px-4 py-3">Requested Ceded SI</th>
-                      <th className="px-4 py-3">Premium</th>
-                      <th className="px-4 py-3">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {referralsSearch.filteredData.map((row) => (
-                      <tr key={row.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 font-semibold text-slate-900">{row.requestId}</td>
-                        <td className="px-4 py-3">{row.riskId}</td>
-                        <td className="px-4 py-3">{row.insured}</td>
-                        <td className="px-4 py-3">{row.product}</td>
-                        <td className="px-4 py-3">
-                          <Badge variant="outline" className={statusClass(row.status)}>{row.status}</Badge>
-                        </td>
-                        <td className="px-4 py-3">{fmtAED(row.requestedCededSI)}</td>
-                        <td className="px-4 py-3">{fmtAED(row.premium)}</td>
-                        <td className="px-4 py-3">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="gap-2"
-                            onClick={() =>
-                              navigate(`${referralBasePath}/${row.id}`, { state: { record: row } })
-                            }
-                          >
-                            View
-                            <ArrowRight className="h-4 w-4" />
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="policies" className="mt-0">
-              <div className="overflow-x-auto rounded-lg border bg-white">
-                <table className="w-full min-w-[62rem] text-sm">
-                  <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    <tr>
-                      <th className="px-4 py-3">Policy ID</th>
-                      <th className="px-4 py-3">Risk ID</th>
-                      <th className="px-4 py-3">Insured</th>
-                      <th className="px-4 py-3">Product</th>
-                      <th className="px-4 py-3">Status</th>
-                      <th className="px-4 py-3">Ceded SI</th>
-                      <th className="px-4 py-3">Reinsurer</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {policiesSearch.filteredData.map((row) => (
-                      <tr key={row.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 font-semibold text-slate-900">{row.policyId}</td>
-                        <td className="px-4 py-3">{row.riskId}</td>
-                        <td className="px-4 py-3">{row.insured}</td>
-                        <td className="px-4 py-3">{row.product}</td>
-                        <td className="px-4 py-3">
-                          <Badge variant="outline" className={statusClass(row.status)}>{row.status}</Badge>
-                        </td>
-                        <td className="px-4 py-3">{fmtAED(row.cededSI)}</td>
-                        <td className="px-4 py-3">{row.reinsurer}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </TabsContent>
-          </Tabs>
+          <div className="overflow-x-auto rounded-lg border bg-white">
+            <table className="w-full min-w-[68rem] text-sm">
+              <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3">Request ID</th>
+                  <th className="px-4 py-3">Risk ID</th>
+                  <th className="px-4 py-3">Insured</th>
+                  <th className="px-4 py-3">Product</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Requested Ceded SI</th>
+                  <th className="px-4 py-3">Premium</th>
+                  <th className="px-4 py-3">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {referralsSearch.filteredData.map((row) => (
+                  <tr key={row.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-semibold text-slate-900">{row.requestId}</td>
+                    <td className="px-4 py-3">{row.riskId}</td>
+                    <td className="px-4 py-3">{row.insured}</td>
+                    <td className="px-4 py-3">{row.product}</td>
+                    <td className="px-4 py-3">
+                      <Badge variant="outline" className={statusClass(row.status)}>{row.status}</Badge>
+                    </td>
+                    <td className="px-4 py-3">{fmtAED(row.requestedCededSI)}</td>
+                    <td className="px-4 py-3">{fmtAED(row.premium)}</td>
+                    <td className="px-4 py-3">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-2"
+                        onClick={() =>
+                          navigate(`${referralBasePath}/${row.id}`, {
+                            state: returnTo ? { record: row, returnTo } : { record: row },
+                          })
+                        }
+                      >
+                        View
+                        <ArrowRight className="h-4 w-4" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </CardContent>
       </Card>
     </div>

@@ -33,6 +33,42 @@ export interface Reinsurer {
   status: 'active' | 'inactive' | string;
   adminEmail?: string;
   adminName?: string;
+  riskAppetite?: RiskAppetiteConfig;
+  facultativeContacts?: FacultativeContactManagement;
+}
+
+export interface FacultativeContactPerson {
+  name: string;
+  email: string;
+  phone?: string;
+  title?: string;
+}
+
+export interface FacultativeTeamContact {
+  id: string;
+  productLine: string;
+  productLabel: string;
+  isCustom?: boolean;
+  primaryContact: FacultativeContactPerson;
+  ccRecipients: string[];
+}
+
+export interface FacultativeContactManagement {
+  teams: FacultativeTeamContact[];
+}
+
+export interface RiskAppetiteConfig {
+  linesWritten?: string[];
+  riskAppetiteLevel?: string;
+  riskAppetiteNotes?: string;
+  maximumRetention?: number | null;
+  maximumRetentionCurrency?: string;
+  acceptedRisks?: string[];
+  declinedRisks?: string[];
+  /** @deprecated use facilityTypes */
+  facilityType?: string;
+  facilityTypes?: string[];
+  facilityInformation?: string;
 }
 
 export interface ListReinsurersResponse {
@@ -60,6 +96,8 @@ export interface CreateReinsurerRequest {
   adminEmail: string;
   adminName: string;
   adminPassword: string;
+  riskAppetite?: RiskAppetiteConfig;
+  facultativeContacts?: FacultativeContactManagement;
 }
 
 export interface UpdateReinsurerRequest {
@@ -77,6 +115,8 @@ export interface UpdateReinsurerRequest {
   adminEmail?: string;
   adminName?: string;
   adminPassword?: string;
+  riskAppetite?: RiskAppetiteConfig;
+  facultativeContacts?: FacultativeContactManagement;
 }
 
 export interface UploadReinsurerLogoResponse {
@@ -137,6 +177,8 @@ interface ReinsurerDTO {
     regions: OperatingLocationDto[];
     zones: OperatingLocationDto[];
   };
+  riskAppetite?: RiskAppetiteConfig;
+  facultativeContacts?: FacultativeContactManagement;
 }
 
 interface ListReinsurersDTOResponse {
@@ -202,6 +244,8 @@ function mapReinsurer(dto: ReinsurerDTO): Reinsurer {
     status: (dto.status ?? '').toLowerCase() as 'active' | 'inactive',
     adminEmail: dto.adminEmail ?? dto.contact?.adminEmail,
     adminName: dto.adminName,
+    riskAppetite: dto.riskAppetite,
+    facultativeContacts: dto.facultativeContacts,
   };
 }
 
@@ -256,6 +300,8 @@ export async function createReinsurer(body: CreateReinsurerRequest): Promise<{ m
     adminEmail: body.adminEmail,
     adminName: body.adminName,
     adminPassword: body.adminPassword,
+    riskAppetite: body.riskAppetite,
+    facultativeContacts: body.facultativeContacts,
     status: 'ACTIVE',
   });
   return { message: res.message, id: res.reinsurer?.id };
@@ -279,6 +325,8 @@ export async function updateReinsurer(
     operatingZones: body.operatingZones,
     adminEmail: body.adminEmail,
     adminName: body.adminName,
+    riskAppetite: body.riskAppetite,
+    facultativeContacts: body.facultativeContacts,
   };
   // only send adminPassword when user explicitly provided a new one
   if (body.adminPassword) {

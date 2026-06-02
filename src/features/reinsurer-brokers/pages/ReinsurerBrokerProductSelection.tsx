@@ -20,7 +20,7 @@ export default function ReinsurerBrokerProductSelection() {
             <p className="text-sm font-semibold uppercase tracking-wide text-primary">Create Facultative Request</p>
             <h2 className="text-2xl font-bold text-slate-900">Select Insurance Product</h2>
             <p className="max-w-3xl text-sm text-muted-foreground">
-              Choose the product for the facultative placement. The next step lets the broker attach a quote form and
+              Choose the product for the facultative placement. The next step lets the requester attach a quote form and
               populate the request details in structured sections.
             </p>
           </div>

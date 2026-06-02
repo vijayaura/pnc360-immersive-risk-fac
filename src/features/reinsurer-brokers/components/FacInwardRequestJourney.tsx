@@ -5,6 +5,12 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/shared/hooks/use-toast';
 import { cn } from '@/shared/utils/lib-utils';
+import {
+  computeFacInwardJourneyCompleted,
+  FAC_INWARD_JOURNEY_STEPS,
+  facInwardStepTimestamp,
+  formatFacInwardBritishDateTime,
+} from '@/features/reinsurer-brokers/model/facInwardJourneyShared';
 
 export type FacInwardRequestJourneyProps = {
   /** Referral lifecycle status label from mock/API. */
@@ -13,44 +19,9 @@ export type FacInwardRequestJourneyProps = {
   signedFacSlipName: string | null;
   requestId: string;
   submittedDate: string;
+  /** e.g. broker facultative outward detail uses "Facultative Outwards journey". */
+  title?: string;
 };
-
-const STEPS = [
-  { label: 'Fac Request Slip', fileSlug: 'fac-request-slip' },
-  { label: 'Quote Slip', fileSlug: 'quote-slip' },
-  { label: 'Placement slip', fileSlug: 'placement-slip' },
-  { label: 'Signed placement Slip', fileSlug: 'signed-placement-slip' },
-] as const;
-
-/** Demo timestamp per milestone on the inward calendar day (completed steps only show a time). */
-function stepInstant(submittedIsoDate: string, stepIndex: number): Date | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(submittedIsoDate.trim());
-  if (!m) return null;
-  const y = Number(m[1]);
-  const mo = Number(m[2]) - 1;
-  const d = Number(m[3]);
-  const clock: readonly [number, number, number][] = [
-    [8, 10, 12],
-    [10, 25, 48],
-    [13, 14, 37],
-    [16, 45, 52],
-  ];
-  const row = clock[Math.min(stepIndex, clock.length - 1)];
-  if (!row) return null;
-  return new Date(y, mo, d, row[0], row[1], row[2]);
-}
-
-function formatBritishDateTime(d: Date) {
-  return d.toLocaleString('en-GB', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  });
-}
 
 function splitBritishDateAndTime(localeString: string) {
   const i = localeString.indexOf(',');
@@ -67,23 +38,17 @@ export function FacInwardRequestJourney({
   signedFacSlipName,
   requestId,
   submittedDate,
+  title = 'Facultative request journey',
 }: FacInwardRequestJourneyProps) {
   const { toast } = useToast();
-  const status = recordStatus.trim();
-  const hasSignedEvidence = placementFinalised || Boolean(signedFacSlipName);
 
-  const completed = useMemo(() => {
-    return STEPS.map((_, index) => {
-      if (index === 0) return true;
-      if (index === 1) return status !== 'Broker Draft';
-      if (index === 2)
-        return status !== 'Broker Draft' && (status === 'Slip Shared' || hasSignedEvidence);
-      return hasSignedEvidence;
-    });
-  }, [hasSignedEvidence, status]);
+  const completed = useMemo(
+    () => computeFacInwardJourneyCompleted(recordStatus, placementFinalised, signedFacSlipName),
+    [recordStatus, placementFinalised, signedFacSlipName],
+  );
 
   const stepDates = useMemo(() => {
-    return STEPS.map((_, idx) => (completed[idx] ? stepInstant(submittedDate, idx) : null));
+    return FAC_INWARD_JOURNEY_STEPS.map((_, idx) => (completed[idx] ? facInwardStepTimestamp(submittedDate, idx) : null));
   }, [completed, submittedDate]);
 
   let lastCompletedIndex = -1;
@@ -92,7 +57,9 @@ export function FacInwardRequestJourney({
   });
 
   const progressPercentage =
-    STEPS.length > 1 ? (Math.max(0, lastCompletedIndex) / (STEPS.length - 1)) * 100 : 0;
+    FAC_INWARD_JOURNEY_STEPS.length > 1
+      ? (Math.max(0, lastCompletedIndex) / (FAC_INWARD_JOURNEY_STEPS.length - 1)) * 100
+      : 0;
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showLeftScroll, setShowLeftScroll] = useState(false);
@@ -113,7 +80,7 @@ export function FacInwardRequestJourney({
   }, []);
 
   const handleStepDownload = (stepIndex: number) => {
-    const step = STEPS[stepIndex];
+    const step = FAC_INWARD_JOURNEY_STEPS[stepIndex];
     const safeReq = requestId.replace(/[^a-zA-Z0-9-_]/g, '_');
     const slip = [
       step.label.toUpperCase(),
@@ -138,7 +105,7 @@ export function FacInwardRequestJourney({
     <Card className="mb-8 w-full border border-blue-200 bg-white">
       <CardHeader className="pb-3">
         <CardTitle className="text-lg font-semibold text-gray-900">
-          Facultative request journey
+          {title}
         </CardTitle>
       </CardHeader>
       <CardContent className="relative pt-0">
@@ -167,7 +134,7 @@ export function FacInwardRequestJourney({
               />
 
               <div className="relative z-10 flex w-full items-start justify-between px-[1rem]">
-                {STEPS.map((step, index) => {
+                {FAC_INWARD_JOURNEY_STEPS.map((step, index) => {
                   const isCompleted = completed[index];
                   const at = stepDates[index];
 
@@ -205,7 +172,7 @@ export function FacInwardRequestJourney({
                       </div>
                       {at ? (
                         (() => {
-                          const line = formatBritishDateTime(at);
+                          const line = formatFacInwardBritishDateTime(at);
                           const { datePart, timePart } = splitBritishDateAndTime(line);
                           return (
                             <time

@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -9,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import {
     ArrowLeft,
+    Brain,
     CheckCircle,
     XCircle,
     Clock,
@@ -25,6 +27,7 @@ import {
     ChevronRight,
     Loader2,
     Lock,
+    History,
 } from 'lucide-react';
 import { useToast } from '@/shared/hooks/use-toast';
 
@@ -42,6 +45,12 @@ import { ReferralOriginBadge } from '@/features/referrals/components/ReferralOri
 import { RatingBreakdownDialog } from '@/features/referrals/components/RatingBreakdownDialog';
 import type { PricingVersion } from '@/features/quotes/api/quotes';
 import { mapApiPricingVersions } from '@/features/quotes/api/quotes';
+import {
+    COMBINED_FAC_HISTORY_CHANGED,
+    getCombinedFacHistoryForReferral,
+    registerCombinedFacDraft,
+    type CombinedFacRequestRecord,
+} from '@/features/referrals/utils/combinedFacRequestHistory';
 
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -119,12 +128,31 @@ function getTreatiesForCover(
         .filter(Boolean);
 }
 
+function collectFacKeysForSection(
+    section: ReinsuranceContextSection,
+    unitsByCoverId: Map<string, Array<{ unitId: string }>>,
+): string[] {
+    const keys: string[] = [];
+    for (const cover of section.covers) {
+        const units = unitsByCoverId.get(cover.id);
+        if (units?.length) {
+            for (const u of units) {
+                keys.push(`u:${section.id}:${cover.id}:${u.unitId}`);
+            }
+        } else {
+            keys.push(`c:${section.id}:${cover.id}`);
+        }
+    }
+    return keys;
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 const InsurerReferralDetails = ({ fullWidth, hideHeader, hideStatusDropdown, hideBackButton }: { fullWidth?: boolean; hideHeader?: boolean; hideStatusDropdown?: boolean; hideBackButton?: boolean }) => {
     const { referralId } = useParams<{ referralId: string }>();
     const navigate = useNavigate();
     const location = useLocation();
+    const [searchParams] = useSearchParams();
     const basePath = location.pathname.startsWith('/market-admin') ? '/market-admin' : '/insurer';
     const { toast } = useToast();
     const queryClient = useQueryClient();
@@ -136,6 +164,9 @@ const InsurerReferralDetails = ({ fullWidth, hideHeader, hideStatusDropdown, hid
     const [isDownloading, setIsDownloading] = useState(false);
     const [showRatingBreakdownDialog, setShowRatingBreakdownDialog] = useState(false);
     const [pricingVersions, setPricingVersions] = useState<PricingVersion[]>([]);
+    /** Row keys: `u:{sectionId}:{coverId}:{unitId}` or `c:{sectionId}:{coverId}` for cover-level rows. */
+    const [selectedFacKeys, setSelectedFacKeys] = useState<string[]>([]);
+    const [combinedFacHistory, setCombinedFacHistory] = useState<CombinedFacRequestRecord[]>([]);
 
     // ── Data fetching ──────────────────────────────────────────────────────────
 
@@ -178,6 +209,28 @@ const InsurerReferralDetails = ({ fullWidth, hideHeader, hideStatusDropdown, hid
         },
     });
 
+    const refreshCombinedFacHistory = useCallback(() => {
+        if (!referralId) return;
+        const q = searchParams.get('quoteId');
+        setCombinedFacHistory(getCombinedFacHistoryForReferral(referralId, q === null ? undefined : q));
+    }, [referralId, searchParams]);
+
+    useEffect(() => {
+        refreshCombinedFacHistory();
+    }, [refreshCombinedFacHistory]);
+
+    useEffect(() => {
+        const onStorage = (e: StorageEvent) => {
+            if (e.key === 'aura_insurer_combined_fac_history_v1') refreshCombinedFacHistory();
+        };
+        window.addEventListener('storage', onStorage);
+        window.addEventListener(COMBINED_FAC_HISTORY_CHANGED, refreshCombinedFacHistory);
+        return () => {
+            window.removeEventListener('storage', onStorage);
+            window.removeEventListener(COMBINED_FAC_HISTORY_CHANGED, refreshCombinedFacHistory);
+        };
+    }, [refreshCombinedFacHistory]);
+
     // ── Handlers ──────────────────────────────────────────────────────────────
 
     const toggleSection = (key: string) => {
@@ -189,37 +242,12 @@ const InsurerReferralDetails = ({ fullWidth, hideHeader, hideStatusDropdown, hid
         });
     };
 
-    // ── Loading / Error states ─────────────────────────────────────────────────
-
-    if (detailLoading) {
-        return (
-            <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-                <div className="text-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4" />
-                    <p className="text-gray-600">Loading referral details...</p>
-                </div>
-            </div>
-        );
-    }
-
-    if (detailError || !detail) {
-        return (
-            <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-                <div className="text-center space-y-3">
-                    <XCircle className="h-10 w-10 text-destructive mx-auto" />
-                    <p className="text-gray-700 font-medium">Failed to load referral details.</p>
-                    <Button variant="outline" size="sm" onClick={() => navigate('/insurer/dashboard')}>
-                        Back to Dashboard
-                    </Button>
-                </div>
-            </div>
-        );
-    }
-
-    // ── Reinsurance context derived values ────────────────────────────────────
+    // ── Reinsurance context derived values (before loading gates — hooks below must run every render) ──
 
     const triggerReinsurance =
-        typeof detail.triggerDetails === 'object' && detail.triggerDetails !== null
+        detail &&
+        typeof detail.triggerDetails === 'object' &&
+        detail.triggerDetails !== null
             ? (detail.triggerDetails as {
                 reinsurance?: {
                     totalGrossPremium?: number;
@@ -313,7 +341,7 @@ const InsurerReferralDetails = ({ fullWidth, hideHeader, hideStatusDropdown, hid
     const programName =
         triggered[0]?.treaty?.name ??
         triggered[0]?.program?.treatyName ??
-        detail.productName ??
+        detail?.productName ??
         'Reinsurance Program';
 
     const isFacultative = triggered.some(
@@ -332,6 +360,140 @@ const InsurerReferralDetails = ({ fullWidth, hideHeader, hideStatusDropdown, hid
         ? allocatedTypes
         : [...new Set(triggered.map((t) => t.treaty.structureType).filter(Boolean))];
     const treatyMatchLabel = uniqueTreatyTypes.length > 0 ? uniqueTreatyTypes.join(', ') : '—';
+
+    const selectedFacSet = useMemo(() => new Set(selectedFacKeys), [selectedFacKeys]);
+
+    const facMultiSummary = useMemo(() => {
+        if (selectedFacKeys.length === 0) return null;
+        const sectionNames = new Set<string>();
+        const coverLines = new Set<string>();
+        const unitLines: string[] = [];
+        let sumInsured = 0;
+        let grossPremium = 0;
+        const coverIds = new Set<string>();
+
+        for (const section of sections) {
+            for (const cover of section.covers) {
+                const units = unitsByCoverId.get(cover.id);
+                if (units?.length) {
+                    for (const u of units) {
+                        const key = `u:${section.id}:${cover.id}:${u.unitId}`;
+                        if (selectedFacSet.has(key)) {
+                            sectionNames.add(section.name);
+                            coverLines.add(`${section.name} › ${cover.name}`);
+                            unitLines.push(`${cover.name}: ${u.unitLabel}`);
+                            sumInsured += u.sumInsured;
+                            grossPremium += u.grossPremium;
+                            coverIds.add(cover.id);
+                        }
+                    }
+                } else {
+                    const key = `c:${section.id}:${cover.id}`;
+                    if (selectedFacSet.has(key)) {
+                        sectionNames.add(section.name);
+                        coverLines.add(`${section.name} › ${cover.name}`);
+                        unitLines.push(`${cover.name}: all`);
+                        const t = coverTotalsByCoverId.get(cover.id);
+                        sumInsured += t?.sumInsured ?? 0;
+                        grossPremium += t?.grossPremium ?? 0;
+                        coverIds.add(cover.id);
+                    }
+                }
+            }
+        }
+        if (coverIds.size === 0) return null;
+        return {
+            sectionNames: [...sectionNames],
+            coverLines: [...coverLines],
+            unitLines,
+            sumInsured,
+            grossPremium,
+            coverIds,
+        };
+    }, [sections, selectedFacKeys, selectedFacSet, unitsByCoverId, coverTotalsByCoverId]);
+
+    const toggleFacKey = useCallback((key: string) => {
+        setSelectedFacKeys((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+    }, []);
+
+    const toggleSectionFacKeys = useCallback(
+        (section: ReinsuranceContextSection) => {
+            const keys = collectFacKeysForSection(section, unitsByCoverId);
+            setSelectedFacKeys((prev) => {
+                const prevSet = new Set(prev);
+                const allOn = keys.length > 0 && keys.every((k) => prevSet.has(k));
+                if (allOn) return prev.filter((k) => !keys.includes(k));
+                const next = new Set(prev);
+                keys.forEach((k) => next.add(k));
+                return [...next];
+            });
+        },
+        [unitsByCoverId],
+    );
+
+    // ── Loading / Error states (after all hooks) ─────────────────────────────
+
+    if (detailLoading) {
+        return (
+            <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4" />
+                    <p className="text-gray-600">Loading referral details...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (detailError || !detail) {
+        return (
+            <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                <div className="text-center space-y-3">
+                    <XCircle className="h-10 w-10 text-destructive mx-auto" />
+                    <p className="text-gray-700 font-medium">Failed to load referral details.</p>
+                    <Button variant="outline" size="sm" onClick={() => navigate('/insurer/dashboard')}>
+                        Back to Dashboard
+                    </Button>
+                </div>
+            </div>
+        );
+    }
+
+    const navigateFacFromMultiSelection = () => {
+        if (!facMultiSummary || facMultiSummary.coverIds.size === 0) return;
+        const coverIdsArr = [...facMultiSummary.coverIds];
+        const p = new URLSearchParams({
+            quoteId: detail.quoteId ?? '',
+            productName: detail.productName ?? '',
+            currency: detail.currency ?? 'AED',
+        });
+        p.set('sumInsured', String(facMultiSummary.sumInsured));
+        p.set('grossPremium', String(facMultiSummary.grossPremium));
+        p.set('coverIds', coverIdsArr.join(','));
+        const coverTitle =
+            coverIdsArr.length === 1
+                ? sections.flatMap((s) => s.covers).find((c) => c.id === coverIdsArr[0])?.name ??
+                  coverIdsArr[0]
+                : `${coverIdsArr.length} covers selected`;
+        p.set('coverTitle', coverTitle);
+        if (coverIdsArr.length === 1) p.set('coverId', coverIdsArr[0]);
+        const bundleId = crypto.randomUUID();
+        registerCombinedFacDraft({
+            bundleId,
+            referralId: referralId!,
+            quoteId: detail.quoteId ?? null,
+            coverIds: coverIdsArr,
+            coverTitle,
+            sectionNames: [...facMultiSummary.sectionNames],
+            coverLines: [...facMultiSummary.coverLines],
+            unitLines: [...facMultiSummary.unitLines],
+            sumInsured: facMultiSummary.sumInsured,
+            grossPremium: facMultiSummary.grossPremium,
+            currency: detail.currency ?? 'AED',
+            createdAt: new Date().toISOString(),
+        });
+        p.set('combinedFacBundleId', bundleId);
+        navigate(`${basePath}/referral/${referralId}/reinsurance?${p}`);
+    };
 
     // ── PDF download (server-generated) ─────────────────────────────────────
 
@@ -416,8 +578,18 @@ const InsurerReferralDetails = ({ fullWidth, hideHeader, hideStatusDropdown, hid
                             </p>
                         </div>
                     </div>
-                    {/* Right section: Dropdown and Download */}
+                    {/* Right section: Immersive assessment, status, rating */}
                     <div className="flex items-center gap-3 shrink-0">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="ai-gradient-shimmer h-9 shrink-0 gap-2"
+                            onClick={() => navigate('/insurer/command-center')}
+                        >
+                            <Brain className="h-4 w-4" />
+                            Immersive Risk Assessment
+                        </Button>
                         {!hideStatusDropdown && (
                             <Select
                                 value={detail.status}
@@ -517,27 +689,235 @@ const InsurerReferralDetails = ({ fullWidth, hideHeader, hideStatusDropdown, hid
                                 </div>
                             </section>
 
+                            {facMultiSummary && (
+                                <Card className="border-primary/25 bg-primary/[0.03] shadow-sm">
+                                    <CardHeader className="pb-2">
+                                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                            <div>
+                                                <CardTitle className="text-base">
+                                                    Facultative request selection
+                                                </CardTitle>
+                                                <p className="text-xs text-muted-foreground mt-1">
+                                                    Selected sections, covers, and units are combined below. Adjust the
+                                                    table checkboxes to change this bundle.
+                                                </p>
+                                            </div>
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-8 text-xs shrink-0"
+                                                onClick={() => setSelectedFacKeys([])}
+                                            >
+                                                Clear selection
+                                            </Button>
+                                        </div>
+                                    </CardHeader>
+                                    <CardContent className="space-y-4 pt-0">
+                                        <div className="grid gap-4 sm:grid-cols-3">
+                                            <div className="space-y-1.5">
+                                                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                                                    Sections
+                                                </div>
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {facMultiSummary.sectionNames.map((name) => (
+                                                        <Badge
+                                                            key={name}
+                                                            variant="secondary"
+                                                            className="font-normal text-xs"
+                                                        >
+                                                            {name}
+                                                        </Badge>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                            <div className="space-y-1.5 sm:col-span-2">
+                                                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                                                    Covers
+                                                </div>
+                                                <ul className="text-sm text-foreground space-y-1 list-disc list-inside">
+                                                    {facMultiSummary.coverLines.map((line) => (
+                                                        <li key={line}>{line}</li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                                                Units
+                                            </div>
+                                            <ul className="text-sm text-foreground space-y-1 list-disc list-inside max-h-32 overflow-y-auto">
+                                                {facMultiSummary.unitLines.map((line, i) => (
+                                                    <li key={`${line}-${i}`}>{line}</li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between border-t border-border pt-4">
+                                            <div className="grid grid-cols-2 gap-6 text-sm">
+                                                <div>
+                                                    <div className="text-xs text-muted-foreground mb-0.5">
+                                                        Sum insured
+                                                    </div>
+                                                    <div className="font-semibold tabular-nums text-foreground">
+                                                        {fmtCurrency(facMultiSummary.sumInsured)}{' '}
+                                                        {detail.currency ?? 'AED'}
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <div className="text-xs text-muted-foreground mb-0.5">
+                                                        Gross premium
+                                                    </div>
+                                                    <div className="font-semibold tabular-nums text-primary">
+                                                        {fmtCurrency(facMultiSummary.grossPremium)}{' '}
+                                                        {detail.currency ?? 'AED'}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <Button
+                                                type="button"
+                                                className="shrink-0 gap-1"
+                                                onClick={navigateFacFromMultiSelection}
+                                            >
+                                                Request facultative
+                                                <ChevronRight className="h-4 w-4" />
+                                            </Button>
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            )}
+
+                            {combinedFacHistory.length > 0 && (
+                                <Card className="border-slate-200 shadow-sm">
+                                    <CardHeader className="pb-2">
+                                        <CardTitle className="text-base flex items-center gap-2">
+                                            <History className="h-4 w-4 text-muted-foreground" />
+                                            Combined facultative request history
+                                        </CardTitle>
+                                        <p className="text-xs text-muted-foreground">
+                                            Bundles created from <strong>Facultative request selection</strong> appear
+                                            here. After you send facultative mails on the reinsurance screen, the row
+                                            updates to <strong>Submitted</strong> with recipients.
+                                        </p>
+                                    </CardHeader>
+                                    <CardContent className="pt-0">
+                                        <div className="overflow-x-auto rounded-md border">
+                                            <table className="w-full text-sm">
+                                                <thead>
+                                                    <tr className="border-b bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                                                        <th className="px-3 py-2 font-medium">Started</th>
+                                                        <th className="px-3 py-2 font-medium">Bundle</th>
+                                                        <th className="px-3 py-2 font-medium text-right">Sum insured</th>
+                                                        <th className="px-3 py-2 font-medium text-right">Gross prem.</th>
+                                                        <th className="px-3 py-2 font-medium">Status</th>
+                                                        <th className="px-3 py-2 font-medium">Recipients</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y">
+                                                    {combinedFacHistory.map((row) => (
+                                                        <tr key={row.bundleId} className="bg-background hover:bg-muted/20">
+                                                            <td className="px-3 py-2.5 whitespace-nowrap text-muted-foreground">
+                                                                {new Date(row.createdAt).toLocaleString()}
+                                                            </td>
+                                                            <td className="px-3 py-2.5 max-w-[220px]">
+                                                                <div className="font-medium text-foreground truncate" title={row.coverTitle}>
+                                                                    {row.coverTitle}
+                                                                </div>
+                                                                <div className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+                                                                    {row.sectionNames.join(' · ')}
+                                                                    {row.unitLines.length > 0 && (
+                                                                        <span>
+                                                                            {' '}
+                                                                            · {row.unitLines.length} unit
+                                                                            {row.unitLines.length !== 1 ? 's' : ''}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            </td>
+                                                            <td className="px-3 py-2.5 text-right tabular-nums">
+                                                                {fmtCurrency(row.sumInsured)} {row.currency}
+                                                            </td>
+                                                            <td className="px-3 py-2.5 text-right tabular-nums text-primary">
+                                                                {fmtCurrency(row.grossPremium)} {row.currency}
+                                                            </td>
+                                                            <td className="px-3 py-2.5">
+                                                                {row.status === 'submitted' ? (
+                                                                    <Badge className="bg-green-50 text-green-800 border-green-200 font-normal">
+                                                                        Submitted
+                                                                    </Badge>
+                                                                ) : (
+                                                                    <Badge variant="outline" className="font-normal text-amber-800 border-amber-200 bg-amber-50/80">
+                                                                        Pending mail
+                                                                    </Badge>
+                                                                )}
+                                                            </td>
+                                                            <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[200px]">
+                                                                {row.status === 'submitted' &&
+                                                                row.recipientCount != null &&
+                                                                row.recipientNames?.length ? (
+                                                                    <span className="line-clamp-3" title={row.recipientNames.join(', ')}>
+                                                                        {row.recipientCount} · {row.recipientNames.join(', ')}
+                                                                    </span>
+                                                                ) : (
+                                                                    '—'
+                                                                )}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            )}
+
                             {/* Sections → Covers (from reinsurance context) */}
                             {sections.length > 0 ? (
-                                sections.map((section) => (
+                                sections.map((section) => {
+                                    const sectionRowKeys = collectFacKeysForSection(section, unitsByCoverId);
+                                    const sectionAllSelected =
+                                        sectionRowKeys.length > 0 &&
+                                        sectionRowKeys.every((k) => selectedFacSet.has(k));
+                                    const sectionSomeSelected =
+                                        sectionRowKeys.some((k) => selectedFacSet.has(k)) &&
+                                        !sectionAllSelected;
+                                    return (
                                     <section key={section.id}>
-                                        <h3 className="text-sm font-semibold text-slate-900 mb-3">{section.name}</h3>
+                                        <div className="flex items-center justify-between gap-3 mb-3">
+                                            <h3 className="text-sm font-semibold text-slate-900">{section.name}</h3>
+                                            <div className="flex items-center gap-2 shrink-0">
+                                                <Checkbox
+                                                    checked={
+                                                        sectionAllSelected
+                                                            ? true
+                                                            : sectionSomeSelected
+                                                              ? 'indeterminate'
+                                                              : false
+                                                    }
+                                                    onCheckedChange={() => toggleSectionFacKeys(section)}
+                                                    aria-label={`Select all covers and units in ${section.name}`}
+                                                />
+                                                <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                                    Select section
+                                                </span>
+                                            </div>
+                                        </div>
                                         <div className="overflow-hidden rounded-lg border border-slate-200 shadow-sm bg-white">
                                             <div style={{ overflowX: 'auto' }}>
-                                                <table style={{ width: '100%', minWidth: '800px', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                                                <table style={{ width: '100%', minWidth: '900px', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
                                                     <colgroup>
-                                                        <col style={{ width: '18%' }} />
-                                                        <col style={{ width: '14%' }} />
-                                                        <col style={{ width: '16%' }} />
-                                                        <col style={{ width: '16%' }} />
-                                                        <col style={{ width: '14%' }} />
-                                                        <col style={{ width: '12%' }} />
+                                                        <col style={{ width: '44px' }} />
+                                                        <col style={{ width: '17%' }} />
+                                                        <col style={{ width: '13%' }} />
+                                                        <col style={{ width: '15%' }} />
+                                                        <col style={{ width: '15%' }} />
+                                                        <col style={{ width: '13%' }} />
+                                                        <col style={{ width: '11%' }} />
                                                         <col style={{ width: '10%' }} />
                                                     </colgroup>
                                                     <thead>
                                                         <tr style={{ backgroundColor: 'rgb(248 250 252)', borderBottom: '1px solid rgb(226 232 240)' }}>
-                                                            {['Cover', 'Unit', 'Treaty', 'Program', 'Sum Insured', 'Gross Premium', 'Action'].map((h, i) => (
-                                                                <th key={h} style={{ padding: '12px 16px', textAlign: i === 6 ? 'center' : 'left', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'rgb(100 116 139)' }}>{h}</th>
+                                                            {['', 'Cover', 'Unit', 'Treaty', 'Program', 'Sum Insured', 'Gross Premium', 'Action'].map((h, i) => (
+                                                                <th key={`${h}-${i}`} style={{ padding: '12px 16px', textAlign: i === 0 || i === 7 ? 'center' : 'left', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'rgb(100 116 139)' }}>{h}</th>
                                                             ))}
                                                         </tr>
                                                     </thead>
@@ -564,9 +944,27 @@ const InsurerReferralDetails = ({ fullWidth, hideHeader, hideStatusDropdown, hid
                                                                 <span style={{ display: 'inline-block', padding: '2px 8px', fontSize: '10px', fontWeight: 600, borderRadius: '4px', backgroundColor: 'rgb(241 245 249)', color: 'rgb(100 116 139)', letterSpacing: '0.03em' }}>Full Retention</span>
                                                             );
 
+                                                            const tdCheckStyle: React.CSSProperties = {
+                                                                ...tdStyle,
+                                                                width: 44,
+                                                                textAlign: 'center',
+                                                                padding: '10px 8px',
+                                                            };
+
                                                             if (units?.length) {
-                                                                return units.map((u, ui) => (
+                                                                return units.map((u, ui) => {
+                                                                    const rowKey = `u:${section.id}:${cover.id}:${u.unitId}`;
+                                                                    return (
                                                                     <tr key={u.unitId} className="hover:bg-slate-50/30 transition-colors">
+                                                                        <td style={tdCheckStyle}>
+                                                                            <div className="flex justify-center">
+                                                                                <Checkbox
+                                                                                    checked={selectedFacSet.has(rowKey)}
+                                                                                    onCheckedChange={() => toggleFacKey(rowKey)}
+                                                                                    aria-label={`Select ${cover.name} — ${u.unitLabel}`}
+                                                                                />
+                                                                            </div>
+                                                                        </td>
                                                                         <td style={tdStyle}>
                                                                             {ui === 0 ? (
                                                                                 <div>
@@ -584,21 +982,45 @@ const InsurerReferralDetails = ({ fullWidth, hideHeader, hideStatusDropdown, hid
                                                                         <td style={{ ...tdStyle, fontVariantNumeric: 'tabular-nums' }}>{fmtCurrency(u.sumInsured)} {detail.currency ?? 'AED'}</td>
                                                                         <td style={{ ...tdStyle, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--primary))' }}>{fmtCurrency(u.grossPremium)} {detail.currency ?? 'AED'}</td>
                                                                         <td style={{ ...tdStyle, textAlign: 'center' }}>
-                                                                            {ui === 0 && (
-                                                                                <div style={{ display: 'flex', justifyContent: 'center' }}>
-                                                                                    <Button variant="outline" size="sm" className="h-7 px-3 text-xs border-slate-200 shadow-sm" onClick={(e) => { e.stopPropagation(); navigate(`${basePath}/referral/${referralId}/reinsurance?${buildParams(cover.id, cover.name, totals?.sumInsured, totals?.grossPremium)}`); }}>
-                                                                                        {hasTreaties ? 'Reinsurance' : 'Request Facultative'}
-                                                                                    </Button>
-                                                                                </div>
-                                                                            )}
+                                                                            <div style={{ display: 'flex', justifyContent: 'center' }}>
+                                                                                <Button
+                                                                                    variant="outline"
+                                                                                    size="sm"
+                                                                                    className="h-7 px-3 text-xs border-slate-200 shadow-sm"
+                                                                                    onClick={(e) => {
+                                                                                        e.stopPropagation();
+                                                                                        navigate(
+                                                                                            `${basePath}/referral/${referralId}/reinsurance?${buildParams(
+                                                                                                cover.id,
+                                                                                                `${cover.name} — ${u.unitLabel}`,
+                                                                                                u.sumInsured,
+                                                                                                u.grossPremium,
+                                                                                            )}`,
+                                                                                        );
+                                                                                    }}
+                                                                                >
+                                                                                    {hasTreaties ? 'Reinsurance' : 'Request Facultative'}
+                                                                                </Button>
+                                                                            </div>
                                                                         </td>
                                                                     </tr>
-                                                                ));
+                                                                    );
+                                                                });
                                                             }
 
                                                             if (hasTreaties && totals) {
+                                                                const coverRowKey = `c:${section.id}:${cover.id}`;
                                                                 return (
                                                                     <tr key={cover.id} className="hover:bg-slate-50/30 transition-colors">
+                                                                        <td style={tdCheckStyle}>
+                                                                            <div className="flex justify-center">
+                                                                                <Checkbox
+                                                                                    checked={selectedFacSet.has(coverRowKey)}
+                                                                                    onCheckedChange={() => toggleFacKey(coverRowKey)}
+                                                                                    aria-label={`Select ${cover.name}`}
+                                                                                />
+                                                                            </div>
+                                                                        </td>
                                                                         <td style={tdStyle}>
                                                                             <div style={{ fontSize: '13px', color: 'rgb(15 23 42)' }}>{cover.name}</div>
                                                                             <div style={{ fontSize: '10px', color: 'rgb(148 163 184)', fontWeight: 500 }}>COVER</div>
@@ -619,8 +1041,18 @@ const InsurerReferralDetails = ({ fullWidth, hideHeader, hideStatusDropdown, hid
                                                                 );
                                                             }
 
+                                                            const coverRowKey = `c:${section.id}:${cover.id}`;
                                                             return (
                                                                 <tr key={cover.id} className="hover:bg-slate-50/30 transition-colors">
+                                                                    <td style={tdCheckStyle}>
+                                                                        <div className="flex justify-center">
+                                                                            <Checkbox
+                                                                                checked={selectedFacSet.has(coverRowKey)}
+                                                                                onCheckedChange={() => toggleFacKey(coverRowKey)}
+                                                                                aria-label={`Select ${cover.name}`}
+                                                                            />
+                                                                        </div>
+                                                                    </td>
                                                                     <td style={tdStyle}>
                                                                         <div style={{ fontSize: '13px', color: 'rgb(15 23 42)' }}>{cover.name}</div>
                                                                         <div style={{ fontSize: '10px', color: 'rgb(148 163 184)', fontWeight: 500 }}>COVER</div>
@@ -632,7 +1064,17 @@ const InsurerReferralDetails = ({ fullWidth, hideHeader, hideStatusDropdown, hid
                                                                     <td style={{ ...tdStyle, fontVariantNumeric: 'tabular-nums', color: totals ? 'hsl(var(--primary))' : 'rgb(148 163 184)' }}>{totals ? `${fmtCurrency(totals.grossPremium)} ${detail.currency ?? 'AED'}` : <span style={{ fontStyle: 'italic' }}>—</span>}</td>
                                                                     <td style={{ ...tdStyle, textAlign: 'center' }}>
                                                                         <div style={{ display: 'flex', justifyContent: 'center' }}>
-                                                                            <Button variant="outline" size="sm" className="h-7 px-3 text-xs border-slate-200 shadow-sm" onClick={(e) => { e.stopPropagation(); navigate(`${basePath}/referral/${referralId}/reinsurance?${buildParams(cover.id, cover.name, totals?.sumInsured, totals?.grossPremium)}`); }}>
+                                                                            <Button
+                                                                                variant="outline"
+                                                                                size="sm"
+                                                                                className="h-7 px-3 text-xs border-slate-200 shadow-sm"
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    navigate(
+                                                                                        `${basePath}/referral/${referralId}/reinsurance?${buildParams(cover.id, cover.name, totals?.sumInsured, totals?.grossPremium)}`,
+                                                                                    );
+                                                                                }}
+                                                                            >
                                                                                 Request Facultative
                                                                             </Button>
                                                                         </div>
@@ -645,7 +1087,8 @@ const InsurerReferralDetails = ({ fullWidth, hideHeader, hideStatusDropdown, hid
                                             </div>
                                         </div>
                                     </section>
-                                ))
+                                    );
+                                })
                             ) : (
                                 <p className="text-sm text-muted-foreground px-1">
                                     {reinsuranceContext

@@ -6,8 +6,19 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Banknote, ChevronDown, FileText, MessageSquare, Search, Send, Shield, TrendingUp, X } from 'lucide-react';
-import { useInsurerDashboardStore } from '@/shared/stores/useInsurerDashboardStore';
+import {
+  Banknote,
+  ChevronDown,
+  FileText,
+  MessageSquare,
+  Search,
+  Send,
+  Shield,
+  ShieldCheck,
+  TrendingUp,
+  X,
+} from 'lucide-react';
+import { useInsurerDashboardStore, type TabValue } from '@/shared/stores/useInsurerDashboardStore';
 import RiskAccumulationDashboard from '@/features/market-admin/pages/RiskAccumulationDashboard';
 import {
   getDashboardStatistics,
@@ -18,6 +29,7 @@ import QuotesTab from '@/features/insurers/components/InsurerDashboard/QuotesTab
 import ReferralsTab from '@/features/insurers/components/InsurerDashboard/ReferralsTab';
 import PoliciesTab from '@/features/insurers/components/InsurerDashboard/PoliciesTab';
 import EndorsementsTab from '@/features/insurers/components/InsurerDashboard/EndorsementsTab';
+import FacInCasesTab from '@/features/insurers/components/InsurerDashboard/FacInCasesTab';
 import { getProducts, type Product } from '@/features/product-config/api/products';
 import {
   listMasterCountries,
@@ -233,8 +245,8 @@ const InsurerDashboard = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-muted/30 to-background p-6 cityscape-bg">
       <div className="w-full px-4 space-y-8">
-        <div className="flex justify-between items-center mb-6">
-          <div>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between mb-6">
+          <div className="min-w-0">
             <div className="flex items-center gap-3">
               <Popover>
                 <PopoverTrigger asChild>
@@ -475,38 +487,45 @@ const InsurerDashboard = () => {
           </Card>
         </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabValue)} className="w-full">
           <TabsList
             ref={tabsListRef}
-            className="grid w-full grid-cols-4 mb-6 bg-primary/5 p-1 h-12"
+            className="grid w-full grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 mb-6 bg-primary/5 p-1 min-h-12 gap-1"
           >
             <TabsTrigger
               value="quotes"
-              className="flex items-center justify-center gap-2 data-[state=active]:text-primary data-[state=active]:bg-background data-[state=active]:shadow-sm h-10"
+              className="flex items-center justify-center gap-2 data-[state=active]:text-primary data-[state=active]:bg-background data-[state=active]:shadow-sm h-10 px-2"
             >
-              <FileText className="w-4 h-4" />
+              <FileText className="w-4 h-4 shrink-0" />
               <span className="truncate">Quote Requests</span>
             </TabsTrigger>
             <TabsTrigger
               value="referrals"
-              className="flex items-center justify-center gap-2 data-[state=active]:text-primary data-[state=active]:bg-background data-[state=active]:shadow-sm h-10"
+              className="flex items-center justify-center gap-2 data-[state=active]:text-primary data-[state=active]:bg-background data-[state=active]:shadow-sm h-10 px-2"
             >
-              <Send className="w-4 h-4" />
+              <Send className="w-4 h-4 shrink-0" />
               <span className="truncate">Referrals</span>
               {getUnreadBadgeCount(unreadReferralCount)}
             </TabsTrigger>
             <TabsTrigger
-              value="policies"
-              className="flex items-center justify-center gap-2 data-[state=active]:text-primary data-[state=active]:bg-background data-[state=active]:shadow-sm h-10"
+              value="fac-in"
+              className="flex items-center justify-center gap-2 data-[state=active]:text-primary data-[state=active]:bg-background data-[state=active]:shadow-sm h-10 px-2"
             >
-              <Shield className="w-4 h-4" />
+              <ShieldCheck className="w-4 h-4 shrink-0" />
+              <span className="truncate">Facultative In</span>
+            </TabsTrigger>
+            <TabsTrigger
+              value="policies"
+              className="flex items-center justify-center gap-2 data-[state=active]:text-primary data-[state=active]:bg-background data-[state=active]:shadow-sm h-10 px-2"
+            >
+              <Shield className="w-4 h-4 shrink-0" />
               <span className="truncate">Issued Policies</span>
             </TabsTrigger>
             <TabsTrigger
               value="endorsements"
-              className="flex items-center justify-center gap-2 data-[state=active]:text-primary data-[state=active]:bg-background data-[state=active]:shadow-sm h-10"
+              className="flex items-center justify-center gap-2 data-[state=active]:text-primary data-[state=active]:bg-background data-[state=active]:shadow-sm h-10 px-2"
             >
-              <FileText className="w-4 h-4" />
+              <FileText className="w-4 h-4 shrink-0" />
               <span className="truncate">Endorsements</span>
               {getUnreadMessageIndicator(unreadEndorsementCount)}
             </TabsTrigger>
@@ -526,6 +545,10 @@ const InsurerDashboard = () => {
               isActive={activeTab === 'referrals'}
               selectedProductIds={selectedProducts}
             />
+          </TabsContent>
+
+          <TabsContent value="fac-in">
+            <FacInCasesTab returnTo="/insurer/dashboard" />
           </TabsContent>
 
           <TabsContent value="policies">

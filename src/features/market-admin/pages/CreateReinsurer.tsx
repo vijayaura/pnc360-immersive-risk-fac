@@ -2,12 +2,15 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
-import ReinsurerForm, { type ReinsurerFormData } from "@/features/reinsurers/components/ReinsurerForm";
+import ReinsurerForm, {
+  buildFacultativeContactsPayload,
+  buildRiskAppetitePayload,
+  type ReinsurerFormData,
+} from "@/features/reinsurers/components/ReinsurerForm";
 import {
   createReinsurer,
   type CreateReinsurerRequest,
 } from "@/features/reinsurers/api/reinsurers";
-import { listMasterCountries, listMasterRegions, listMasterZones } from "@/features/product-config/masters/api/masters";
 import { useToast } from "@/shared/hooks/use-toast";
 
 const CreateReinsurer = () => {
@@ -20,26 +23,6 @@ const CreateReinsurer = () => {
     setServerError(null);
     setIsSubmitting(true);
     try {
-      // 1. Resolve geo objects from master lists
-      const [masterCountries, masterRegions, masterZones] = await Promise.all([
-        listMasterCountries(),
-        listMasterRegions(),
-        listMasterZones(),
-      ]);
-
-      const selectedCountryObjects = (values.countries || [])
-        .map((id) => masterCountries.find((c) => c.id === id))
-        .filter((v): v is (typeof masterCountries)[number] => Boolean(v));
-
-      const selectedRegionObjects = (values.regions || [])
-        .map((id) => masterRegions.find((r) => r.id === id))
-        .filter((v): v is (typeof masterRegions)[number] => Boolean(v));
-
-      const selectedZoneObjects = (values.zones || [])
-        .map((id) => masterZones.find((z) => z.id === id))
-        .filter((v): v is (typeof masterZones)[number] => Boolean(v));
-
-      // 2. Build payload
       const payload: CreateReinsurerRequest = {
         name: values.name,
         gradeId: values.gradeId,
@@ -47,32 +30,13 @@ const CreateReinsurer = () => {
         contactEmail: values.email,
         phone: values.phone,
         address: values.address,
-        operatingCountries: selectedCountryObjects.map((c) => ({
-          id: c.id,
-          value: c.value,
-          label: c.label,
-          active: true,
-        })),
-        operatingRegions: selectedRegionObjects.map((r) => ({
-          id: r.id,
-          value: r.value,
-          label: r.label,
-          countryId: r.countryId,
-          active: true,
-        })),
-        operatingZones: selectedZoneObjects.map((z) => ({
-          id: z.id,
-          value: z.value,
-          label: z.label,
-          regionId: z.regionId,
-          active: true,
-        })),
         adminEmail: values.adminUserEmail,
         adminName: values.adminUserName,
         adminPassword: values.adminUserPassword,
+        riskAppetite: buildRiskAppetitePayload(values),
+        facultativeContacts: buildFacultativeContactsPayload(values),
       };
 
-      // 3. Create reinsurer
       const res = await createReinsurer(payload);
       toast({ title: "Success", description: res.message || "Reinsurer created successfully." });
       navigate("/market-admin/reinsurance-management");
@@ -94,7 +58,6 @@ const CreateReinsurer = () => {
     <div className="min-h-screen bg-gradient-to-br from-background to-secondary/20 flex flex-col cityscape-bg">
       <div className="flex-1 p-6">
         <div className="w-full max-w-7xl mx-auto">
-          {/* Header */}
           <div className="flex items-center gap-4 mb-8">
             <Button
               variant="outline"

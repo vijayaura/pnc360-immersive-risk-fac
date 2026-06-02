@@ -2,12 +2,15 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
-import ReinsuranceBrokerForm, { type ReinsuranceBrokerFormData } from "@/features/reinsurance-brokers/components/ReinsuranceBrokerForm";
+import ReinsuranceBrokerForm, {
+  buildFacultativeTreatyPayload,
+  buildFacilityIntelligencePayload,
+  type ReinsuranceBrokerFormData,
+} from "@/features/reinsurance-brokers/components/ReinsuranceBrokerForm";
 import {
   createReinsuranceBroker,
   type CreateReinsuranceBrokerRequest,
 } from "@/features/reinsurance-brokers/api/reinsurance-brokers";
-import { listMasterCountries, listMasterRegions, listMasterZones } from "@/features/product-config/masters/api/masters";
 import { useToast } from "@/shared/hooks/use-toast";
 
 const CreateReinsuranceBroker = () => {
@@ -20,24 +23,6 @@ const CreateReinsuranceBroker = () => {
     setServerError(null);
     setIsSubmitting(true);
     try {
-      const [masterCountries, masterRegions, masterZones] = await Promise.all([
-        listMasterCountries(),
-        listMasterRegions(),
-        listMasterZones(),
-      ]);
-
-      const selectedCountryObjects = (values.countries || [])
-        .map((id) => masterCountries.find((c) => c.id === id))
-        .filter((v): v is (typeof masterCountries)[number] => Boolean(v));
-
-      const selectedRegionObjects = (values.regions || [])
-        .map((id) => masterRegions.find((r) => r.id === id))
-        .filter((v): v is (typeof masterRegions)[number] => Boolean(v));
-
-      const selectedZoneObjects = (values.zones || [])
-        .map((id) => masterZones.find((z) => z.id === id))
-        .filter((v): v is (typeof masterZones)[number] => Boolean(v));
-
       const payload: CreateReinsuranceBrokerRequest = {
         name: values.name,
         licenseNumber: values.licenseNumber || undefined,
@@ -45,28 +30,10 @@ const CreateReinsuranceBroker = () => {
         phone: values.phone,
         address: values.address,
         isDirect: values.isDirect ?? false,
-        operatingCountries: selectedCountryObjects.map((c) => ({
-          id: c.id,
-          value: c.value,
-          label: c.label,
-          active: true,
-        })),
-        operatingRegions: selectedRegionObjects.map((r) => ({
-          id: r.id,
-          value: r.value,
-          label: r.label,
-          countryId: r.countryId,
-          active: true,
-        })),
-        operatingZones: selectedZoneObjects.map((z) => ({
-          id: z.id,
-          value: z.value,
-          label: z.label,
-          regionId: z.regionId,
-          active: true,
-        })),
         adminEmail: values.adminUserEmail || undefined,
         adminName: values.adminUserName || undefined,
+        facultativeTreaty: buildFacultativeTreatyPayload(values),
+        facilityIntelligence: buildFacilityIntelligencePayload(values),
       };
 
       const res = await createReinsuranceBroker(payload);

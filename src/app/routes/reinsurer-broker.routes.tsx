@@ -20,7 +20,10 @@ export const ReinsurerBrokerRoutes = (
     <Route index element={<Navigate to="dashboard" replace />} />
     <Route path="dashboard" element={<ReinsurerBrokerDashboard />} />
     <Route path="referral/:recordId" element={<ReinsurerBrokerRequestDetails />} />
-    <Route path="referral/:recordId/reinsurer/:reinsurerId" element={<ReinsurerBrokerRequestDetails />} />
+    <Route
+      path="referral/:recordId/reinsurer/:reinsurerId"
+      element={<ReinsurerBrokerRequestDetails embedInwardFacLayout />}
+    />
     <Route path="facultative-request" element={<ReinsurerBrokerProductSelection />} />
     <Route path="facultative-request/:productId" element={<ReinsurerBrokerFacultativeRequest />} />
     <Route path="policies" element={<ReinsurerBrokerDashboard />} />

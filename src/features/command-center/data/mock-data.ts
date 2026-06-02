@@ -78,6 +78,10 @@ export const mockProperties: Property[] = [
     documents: [
       { id: 'doc-1', name: 'Burj Khalifa Master Policy Proposal.pdf', type: 'proposal', uploadDate: '2026-04-15', size: '12.4 MB' },
       { id: 'doc-2', name: 'Emaar Fire Safety Certificate 2026.pdf', type: 'certificate', uploadDate: '2026-04-10', size: '3.1 MB' },
+      { id: 'doc-2a', name: 'Executive Engineering Survey Report 2025.pdf', type: 'survey', uploadDate: '2025-09-18', size: '8.6 MB' },
+      { id: 'doc-2b', name: 'Façade & Cladding Inspection Report.pdf', type: 'report', uploadDate: '2025-11-04', size: '14.2 MB' },
+      { id: 'doc-2c', name: 'Sprinkler Riser Test Certificate.pdf', type: 'certificate', uploadDate: '2026-01-22', size: '2.4 MB' },
+      { id: 'doc-2d', name: 'Underwriter Site Visit Notes — Q1 2026.pdf', type: 'note', uploadDate: '2026-03-08', size: '1.1 MB' },
     ],
   },
   {

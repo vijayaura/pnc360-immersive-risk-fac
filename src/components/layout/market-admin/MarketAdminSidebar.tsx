@@ -68,7 +68,7 @@ const sidebarItems: SidebarItem[] = [{
     icon: Sparkles,
     matchPaths: ["/market-admin/fac-ai-studio"],
 }, {
-    title: "Template Management",
+    title: "Templates",
     url: "/market-admin/customer-template-management",
     icon: LayoutTemplate
 }, {
@@ -81,7 +81,7 @@ const sidebarItems: SidebarItem[] = [{
     icon: Layers,
     matchPaths: ["/market-admin/risk-categorisation"],
 }, {
-    title: "Underwriter Management",
+    title: "Underwriters",
     url: "/market-admin/insurer-management",
     icon: Building2,
     matchPaths: [
@@ -90,7 +90,7 @@ const sidebarItems: SidebarItem[] = [{
         "/market-admin/insurers",
     ]
 }, {
-    title: "Distributor Management",
+    title: "Distributors",
     url: "/market-admin/broker-management",
     icon: Users,
     matchPaths: [
@@ -98,7 +98,7 @@ const sidebarItems: SidebarItem[] = [{
         "/market-admin/broker/",
     ]
 }, {
-    title: "Reinsurance Management",
+    title: "Reinsurers",
     url: "/market-admin/reinsurance-management",
     icon: Shield,
     matchPaths: [

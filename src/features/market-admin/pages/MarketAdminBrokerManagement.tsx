@@ -296,7 +296,7 @@ const MarketAdminBrokerManagement = () => {
                 Back
               </Button> */}
               <div>
-                <h1 className="text-4xl font-bold text-foreground mb-2">Distributor Management</h1>
+                <h1 className="text-4xl font-bold text-foreground mb-2">Distributors</h1>
                 <p className="text-lg text-muted-foreground">
                   Manage distributor accounts and their commission structures
                 </p>
@@ -317,7 +317,7 @@ const MarketAdminBrokerManagement = () => {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Users className="w-5 h-5" />
-                Distributor Management
+                Distributors
               </CardTitle>
               <CardDescription>
                 Manage distributor accounts, view their statistics, and configure commission rates

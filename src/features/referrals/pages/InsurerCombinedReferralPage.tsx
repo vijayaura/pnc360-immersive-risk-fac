@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Loader2, Download } from 'lucide-react';
+import { ArrowLeft, Brain, Loader2, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import InsurerReferralDetails from './InsurerReferralDetails';
 import ReferralDetails from '@/features/proposals/pages/ReferralDetails';
 import { getReferralDetail, updateReferralStatus, downloadReferralPdf } from '@/features/proposals/api/referrals';
@@ -37,6 +38,7 @@ const InsurerCombinedReferralPage = () => {
     const [riskRating, setRiskRating] = useState('');
     const [decision, setDecision] = useState('');
     const [isDownloading, setIsDownloading] = useState(false);
+    const [detailTab, setDetailTab] = useState<'underwriting' | 'reinsurance'>('underwriting');
 
     const { data: detail, isLoading } = useQuery({
         queryKey: ['referral-detail', referralId],
@@ -48,6 +50,10 @@ const InsurerCombinedReferralPage = () => {
     // Scroll to top when component mounts or referralId changes
     useEffect(() => {
         window.scrollTo(0, 0);
+    }, [referralId]);
+
+    useEffect(() => {
+        setDetailTab('underwriting');
     }, [referralId]);
 
 
@@ -167,6 +173,16 @@ const InsurerCombinedReferralPage = () => {
                                 </div>
                             </div>
                             <div className="flex items-center gap-3 ml-6">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="ai-gradient-shimmer h-10 shrink-0 gap-2"
+                                    onClick={() => navigate('/insurer/command-center')}
+                                >
+                                    <Brain className="h-4 w-4" />
+                                    Immersive Risk Assessment
+                                </Button>
                                 <div className="relative w-[200px]">
                                     <Select
                                         value={detail?.status || ''}
@@ -206,26 +222,35 @@ const InsurerCombinedReferralPage = () => {
                         </div>
                     </div>
 
-                    <div className="space-y-4">
-                        {/* Underwriting sub-section */}
-                        <div className="rounded-lg border border-border overflow-hidden">
-                            <div
-                                className="flex items-center justify-between px-6 py-2.5 bg-muted/40"
-                            >
-                                <h3 className="text-sm font-semibold text-primary">Underwriting Referral</h3>
+                    <div className="rounded-lg border border-border overflow-hidden bg-card">
+                        <Tabs
+                            value={detailTab}
+                            onValueChange={(v) => setDetailTab(v as 'underwriting' | 'reinsurance')}
+                            className="w-full"
+                        >
+                            <div className="border-b border-border bg-muted/40 px-4 py-3 sm:px-6">
+                                <TabsList className="grid h-auto w-full grid-cols-2 gap-1 rounded-lg bg-background/80 p-1 sm:inline-flex sm:w-auto sm:justify-start">
+                                    <TabsTrigger
+                                        value="underwriting"
+                                        className="text-xs font-semibold text-muted-foreground transition-colors data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm sm:px-4 sm:text-sm"
+                                    >
+                                        Underwriting Referral
+                                    </TabsTrigger>
+                                    <TabsTrigger
+                                        value="reinsurance"
+                                        className="text-xs font-semibold text-muted-foreground transition-colors data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm sm:px-4 sm:text-sm"
+                                    >
+                                        Reinsurance Details
+                                    </TabsTrigger>
+                                </TabsList>
                             </div>
-                            <ReferralDetails fullWidth hideHeader />
-                        </div>
-
-                        {/* Reinsurance sub-section */}
-                        <div className="rounded-lg border border-border overflow-hidden">
-                            <div
-                                className="flex items-center justify-between px-6 py-2.5 bg-muted/40"
-                            >
-                                <h3 className="text-sm font-semibold text-primary">Reinsurance Details</h3>
-                            </div>
-                            <InsurerReferralDetails fullWidth hideHeader hideBackButton hideStatusDropdown />
-                        </div>
+                            <TabsContent value="underwriting" className="m-0 mt-0 focus-visible:ring-0 focus-visible:ring-offset-0">
+                                <ReferralDetails fullWidth hideHeader />
+                            </TabsContent>
+                            <TabsContent value="reinsurance" className="m-0 mt-0 focus-visible:ring-0 focus-visible:ring-offset-0">
+                                <InsurerReferralDetails fullWidth hideHeader hideBackButton hideStatusDropdown />
+                            </TabsContent>
+                        </Tabs>
                     </div>
                 </div>
 

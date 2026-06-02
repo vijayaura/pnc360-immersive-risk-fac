@@ -4,8 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Plus, X, Upload } from "lucide-react";
 import InsurerForm, { InsurerFormData } from "@/features/insurers/components/InsurerForm";
-import { createInsurer, uploadInsurerLogoFile } from '@/features/insurers/api/insurers';
-import { listMasterCountries, listMasterRegions, listMasterZones } from '@/features/product-config/masters/api/masters';;
+import { createInsurer, uploadInsurerLogoFile, type CreateInsurerRequest } from '@/features/insurers/api/insurers';
 import { useToast } from '@/shared/hooks/use-toast';
 import { formatFileSize } from '@/shared/utils/fileUtils';
 
@@ -59,31 +58,7 @@ const CreateInsurer = () => {
         }
       }
 
-      // 2. Load master lists to map selected ids to full objects
-      // This is required because the backend expects lists of objects for operating locations
-      const [masterCountries, masterRegions, masterZones] = await Promise.all([
-        listMasterCountries(),
-        listMasterRegions(),
-        listMasterZones(),
-      ]);
-
-      const selectedCountryObjects = (values.countries || [])
-        .map((id) => masterCountries.find((c) => c.id === id))
-        .filter((v): v is (typeof masterCountries)[number] => Boolean(v));
-
-      const selectedRegionObjects = (values.regions || [])
-        .map((id) => masterRegions.find((r) => r.id === id))
-        .filter((v): v is (typeof masterRegions)[number] => Boolean(v));
-
-      const selectedZoneObjects = (values.zones || [])
-        .map((id) => masterZones.find((z) => z.id === id))
-        .filter((v): v is (typeof masterZones)[number] => Boolean(v));
-
-      // Hierarchical Validation for Geographic Coverage
-      // Validation is now handled by Zod schema in InsurerForm
-
-
-      // 3. Construct payload
+      // Construct payload
       const payload: CreateInsurerRequest = {
         name: values.name,
         adminEmail: values.adminUserEmail,
@@ -92,26 +67,6 @@ const CreateInsurer = () => {
         contactNumber: values.phone,
         address: values.address,
         licenseNumber: values.licenseNumber || undefined,
-        operatingCountries: selectedCountryObjects.map(c => ({
-          id: c.id,
-          value: c.value,
-          label: c.label,
-          active: true // Default to active for new selections
-        })),
-        operatingRegions: selectedRegionObjects.map(r => ({
-          id: r.id,
-          value: r.value,
-          label: r.label,
-          countryId: r.countryId,
-          active: true
-        })),
-        operatingZones: selectedZoneObjects.map(z => ({
-          id: z.id,
-          value: z.value,
-          label: z.label,
-          regionId: z.regionId,
-          active: true
-        })),
         companyLogo: logoUrl,
         companyLogoId: logoFileId,
       };

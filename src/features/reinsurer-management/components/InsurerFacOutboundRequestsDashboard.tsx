@@ -59,7 +59,7 @@ function useOutboundDisplayRows() {
   }, []);
 }
 
-export function InsurerFacOutboundRequestsDashboard() {
+export function InsurerFacOutboundRequestsDashboard({ returnTo }: { returnTo?: string } = {}) {
   const navigate = useNavigate();
   const rows = useOutboundDisplayRows();
 
@@ -187,7 +187,7 @@ export function InsurerFacOutboundRequestsDashboard() {
                         onClick={() =>
                           navigate(
                             `/insurer/referral/${INSURER_FAC_OUT_DEMO_REFERRAL_ID}/reinsurance/fac/${row.id}/reinsurer/${reinsurerSlugForDemoRow(row)}`,
-                            { state: { record: row } },
+                            { state: returnTo ? { record: row, returnTo } : { record: row } },
                           )
                         }
                       >

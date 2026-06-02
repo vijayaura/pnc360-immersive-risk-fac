@@ -182,7 +182,6 @@ const rows: ReinsurerPolicyRecord[] = [
 ];
 
 type ProgramTab = 'facultative' | 'treaties' | 'special-acceptance';
-type RecordTab = 'quotes' | 'policies';
 
 const isSpecialAcceptanceRow = (row: ReinsurerPolicyRecord) =>
   (row.programNames ?? []).some((name) => name.toLowerCase().includes('special acceptance'));
@@ -192,7 +191,6 @@ export default function ReinsurerDashboard() {
   const [search, setSearch] = useState('');
   const [productFilter, setProductFilter] = useState<string | undefined>();
   const [activeProgramTab, setActiveProgramTab] = useState<ProgramTab>('facultative');
-  const [activeRecordTab, setActiveRecordTab] = useState<RecordTab>('policies');
 
   const tabRows = useMemo(
     () => {
@@ -208,11 +206,13 @@ export default function ReinsurerDashboard() {
         return programRows.filter((row) => row.policyUuid);
       }
 
-      return activeRecordTab === 'quotes'
-        ? programRows.filter((row) => row.quoteId && !row.policyUuid)
-        : programRows.filter((row) => row.policyUuid);
+      if (activeProgramTab === 'special-acceptance') {
+        return programRows;
+      }
+
+      return [];
     },
-    [activeProgramTab, activeRecordTab],
+    [activeProgramTab],
   );
 
   const filteredRows = useMemo(() => {
@@ -271,16 +271,7 @@ export default function ReinsurerDashboard() {
   };
 
   const handleProgramTabChange = (value: string) => {
-    const nextTab = value as ProgramTab;
-    setActiveProgramTab(nextTab);
-    if (nextTab === 'treaties') {
-      setActiveRecordTab('policies');
-    }
-    resetTableState();
-  };
-
-  const handleRecordTabChange = (value: string) => {
-    setActiveRecordTab(value as RecordTab);
+    setActiveProgramTab(value as ProgramTab);
     resetTableState();
   };
 
@@ -409,25 +400,12 @@ export default function ReinsurerDashboard() {
             </div>
           ) : null}
 
-          {activeProgramTab !== 'treaties' && (
-            <Tabs value={activeRecordTab} onValueChange={handleRecordTabChange} className="mb-4">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="quotes" className="w-full">
-                  Slips
-                </TabsTrigger>
-                <TabsTrigger value="policies" className="w-full">
-                  Policies
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
-          )}
-
           <TabsContent value="treaties" className="mt-0">
             <Card className="border-border bg-card">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Network className="h-5 w-5" />
-                  {activeRecordTab === 'quotes' ? 'Slips' : 'Policies'}
+                  Policies
                 </CardTitle>
                 <CardDescription>
                   Search, filter, and open treaty-backed records to view referral information and product breakdown.
@@ -444,7 +422,7 @@ export default function ReinsurerDashboard() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Network className="h-5 w-5" />
-                  {activeRecordTab === 'quotes' ? 'Slips' : 'Policies'}
+                  Special acceptance records
                 </CardTitle>
                 <CardDescription>
                   Search, filter, and open special acceptance records to view referral information and product breakdown.
@@ -457,23 +435,7 @@ export default function ReinsurerDashboard() {
           </TabsContent>
 
           <TabsContent value="facultative" className="mt-0">
-            {activeRecordTab === 'quotes' ? (
-              <FacInCasesTab hideSummary referralBasePath="/reinsurer/fac-slips" />
-            ) : (
-              <Card className="border-border bg-card">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Network className="h-5 w-5" />
-                    Policies
-                  </CardTitle>
-                  <CardDescription>
-                    Search, filter, and open facultative-backed policy records to view referral information and product
-                    breakdown.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>{renderPolicyTable()}</CardContent>
-              </Card>
-            )}
+            <FacInCasesTab hideSummary referralBasePath="/reinsurer/fac-slips" />
           </TabsContent>
         </Tabs>
       </div>

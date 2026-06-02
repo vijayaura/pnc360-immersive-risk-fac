@@ -16,7 +16,6 @@ import {
 import { ArrowLeft, Plus, X, Upload } from "lucide-react";
 import InsurerForm, { InsurerFormData } from "@/features/insurers/components/InsurerForm";
 import { toast } from '@/shared/hooks/use-toast';
-import { listMasterCountries, listMasterRegions, listMasterZones, Country, Region, Zone } from '@/features/product-config/masters/api/masters';
 import { getInsurer, updateInsurer, setInsurerStatus, uploadInsurerLogoFile, UpdateInsurerRequest } from '@/features/insurers/api/insurers';;
 import FormSkeleton from "@/components/loaders/FormSkeleton";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,9 +33,6 @@ const EditInsurer = () => {
   const [isActive, setIsActive] = useState(true);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<boolean | null>(null);
-  const [masterCountries, setMasterCountries] = useState<Country[]>([]);
-  const [masterRegions, setMasterRegions] = useState<Region[]>([]);
-  const [masterZones, setMasterZones] = useState<Zone[]>([]);
 
   // Logo state
   const [logoFile, setLogoFile] = useState<File | null>(null);
@@ -52,41 +48,7 @@ const EditInsurer = () => {
       try {
         if (!insurerId) return;
 
-        const [c, r, z, data] = await Promise.all([
-          listMasterCountries(),
-          listMasterRegions(),
-          listMasterZones(),
-          getInsurer(insurerId),
-        ]);
-        setMasterCountries(c);
-        setMasterRegions(r);
-        setMasterZones(z);
-
-        // Resolve geo ids for pre-population: use geoCoverage first, fallback to branding.metadata
-        const fromGeo = data.geoCoverage;
-        const fromMeta = data.branding?.metadata;
-        const countriesList =
-          (fromGeo?.countries?.length ? fromGeo.countries : null) ??
-          (fromMeta?.operatingCountries?.length ? fromMeta.operatingCountries : null) ??
-          [];
-        const regionsList =
-          (fromGeo?.regions?.length ? fromGeo.regions : null) ??
-          (fromMeta?.operatingRegions?.length ? fromMeta.operatingRegions : null) ??
-          [];
-        const zonesList =
-          (fromGeo?.zones?.length ? fromGeo.zones : null) ??
-          (fromMeta?.operatingZones?.length ? fromMeta.operatingZones : null) ??
-          [];
-
-        const countryIds = (countriesList as { id?: string }[])
-          .map((item) => item.id)
-          .filter((v): v is string => Boolean(v));
-        const regionIds = (regionsList as { id?: string }[])
-          .map((item) => item.id)
-          .filter((v): v is string => Boolean(v));
-        const zoneIds = (zonesList as { id?: string }[])
-          .map((item) => item.id)
-          .filter((v): v is string => Boolean(v));
+        const data = await getInsurer(insurerId);
 
         const logoUrl = data.branding?.logoFileUrl || data.companyLogo || null;
         setExistingLogoUrl(logoUrl);
@@ -109,9 +71,6 @@ const EditInsurer = () => {
           email: data.tenantEmail || data.email || "",
           phone: data.contactNumber || data.phone || "",
           address: data?.branding?.metadata?.address || data.address || "",
-          countries: countryIds,
-          regions: regionIds,
-          zones: zoneIds,
           adminUserName: data.adminName || "",
           adminUserEmail: data.adminEmail || "",
           // Don't pre-fill password for edit
@@ -141,13 +100,6 @@ const EditInsurer = () => {
 
   const handleSubmit = async (formData: InsurerFormData) => {
     setErrorMessage(null);
-
-    // Geographical coverage is mandatory; InsurerForm blocks submit and shows validation when empty
-    const hasGeo =
-      (formData.countries?.length ?? 0) >= 1 &&
-      (formData.regions?.length ?? 0) >= 1 &&
-      (formData.zones?.length ?? 0) >= 1;
-    if (!hasGeo) return;
 
     // Logo is mandatory even on edit
     if (!logoFile && !existingLogoUrl) {
@@ -196,49 +148,12 @@ const EditInsurer = () => {
         finalLogoId = null;
       }
 
-      // 2. Map Selections to Full Objects
-      const selectedCountryObjects = (formData.countries || [])
-        .map((id) => masterCountries.find((c) => c.id === id))
-        .filter((v): v is (typeof masterCountries)[number] => Boolean(v));
-
-      const selectedRegionObjects = (formData.regions || [])
-        .map((id) => masterRegions.find((r) => r.id === id))
-        .filter((v): v is (typeof masterRegions)[number] => Boolean(v));
-
-      const selectedZoneObjects = (formData.zones || [])
-        .map((id) => masterZones.find((z) => z.id === id))
-        .filter((v): v is (typeof masterZones)[number] => Boolean(v));
-
-      // Hierarchical Validation for Geographic Coverage
-      // Validation is now handled by Zod schema in InsurerForm
-
-
       const payload: UpdateInsurerRequest = {
         name: formData.name,
         licenseNumber: formData.licenseNumber,
         insurerEmail: formData.email,
         contactNumber: formData.phone,
         address: formData.address,
-        operatingCountries: selectedCountryObjects.map(c => ({
-          id: c.id,
-          value: c.value,
-          label: c.label,
-          active: true
-        })),
-        operatingRegions: selectedRegionObjects.map(r => ({
-          id: r.id,
-          value: r.value,
-          label: r.label,
-          countryId: r.countryId,
-          active: true
-        })),
-        operatingZones: selectedZoneObjects.map(z => ({
-          id: z.id,
-          value: z.value,
-          label: z.label,
-          regionId: z.regionId,
-          active: true
-        })),
         adminName: formData.adminUserName,
         adminEmail: formData.adminUserEmail,
         adminPassword: formData.adminUserPassword || undefined,

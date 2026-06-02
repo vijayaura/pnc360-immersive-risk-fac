@@ -36,7 +36,7 @@ export default function ReinsurerBrokerLogin() {
     const demoUser = {
       id: 'demo-reinsurer-broker',
       email: formData.email.trim(),
-      name: 'Demo Reinsurance Broker',
+      name: 'Demo Reinsurance Requester',
       role: 'reinsurer_broker' as const,
       userType: 'REINSURER_BROKER',
       user_type: 'reinsurer_broker',
@@ -82,9 +82,9 @@ export default function ReinsurerBrokerLogin() {
               </div>
               <h2 className="text-2xl font-semibold">P&C 360 Platform</h2>
             </div>
-            <h1 className="mb-4 text-4xl font-bold leading-tight lg:text-5xl">Reinsurer Broker Portal</h1>
+            <h1 className="mb-4 text-4xl font-bold leading-tight lg:text-5xl">Reinsurance Requester Portal</h1>
             <p className="text-base leading-relaxed text-white/90 lg:text-lg">
-              Place facultative reinsurance requests, coordinate referrals, and track policies from a broker workspace.
+              Place facultative reinsurance requests, coordinate referrals, and track policies from a requester workspace.
             </p>
           </div>
         </div>
@@ -100,7 +100,7 @@ export default function ReinsurerBrokerLogin() {
             <div className="w-full max-w-md">
               <div className="mb-8 text-center">
                 <img src={siteLogo} alt="P&C 360 Logo" className="mx-auto mb-4 h-16 w-auto" />
-                <h1 className="mb-2 text-3xl font-bold text-foreground">Reinsurer Broker Login</h1>
+                <h1 className="mb-2 text-3xl font-bold text-foreground">Reinsurance Requester Login</h1>
                 <p className="text-muted-foreground">Use any dummy credentials to continue.</p>
               </div>
 
@@ -149,7 +149,7 @@ export default function ReinsurerBrokerLogin() {
                     </div>
 
                     <Button type="submit" className="w-full" disabled={!isReady}>
-                      Login to Reinsurer Broker Portal
+                      Login to Reinsurance Requester Portal
                     </Button>
                   </form>
                 </CardContent>

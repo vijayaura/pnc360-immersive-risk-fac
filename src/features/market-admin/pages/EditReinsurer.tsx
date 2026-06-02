@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -15,16 +15,20 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Plus, X, Upload } from "lucide-react";
-import ReinsurerForm, { type ReinsurerFormData } from "@/features/reinsurers/components/ReinsurerForm";
+import ReinsurerForm, {
+  buildFacultativeContactsPayload,
+  buildRiskAppetitePayload,
+  type ReinsurerFormData,
+} from "@/features/reinsurers/components/ReinsurerForm";
 import {
   getReinsurer,
   updateReinsurer,
   setReinsurerStatus,
   uploadReinsurerLogoFile,
   type UpdateReinsurerRequest,
+  type RiskAppetiteConfig,
+  type FacultativeContactManagement,
 } from "@/features/reinsurers/api/reinsurers";
-import { listMasterCountries, listMasterRegions, listMasterZones } from "@/features/product-config/masters/api/masters";
-import type { Country, Region, Zone } from "@/features/product-config/masters/api/masters";
 import { useToast } from "@/shared/hooks/use-toast";
 import FormSkeleton from "@/components/loaders/FormSkeleton";
 import { formatFileSize } from "@/shared/utils/fileUtils";
@@ -32,6 +36,8 @@ import { formatFileSize } from "@/shared/utils/fileUtils";
 type EditReinsurerInitialData = Partial<ReinsurerFormData> & {
   id?: string;
   status?: string;
+  riskAppetite?: RiskAppetiteConfig;
+  facultativeContacts?: FacultativeContactManagement;
 };
 
 function messageFromUnknown(err: unknown, fallback: string): string {
@@ -62,10 +68,6 @@ const EditReinsurer = () => {
   const [pendingStatus, setPendingStatus] = useState<boolean | null>(null);
   const [statusChanging, setStatusChanging] = useState(false);
 
-  const [masterCountries, setMasterCountries] = useState<Country[]>([]);
-  const [masterRegions, setMasterRegions] = useState<Region[]>([]);
-  const [masterZones, setMasterZones] = useState<Zone[]>([]);
-
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [existingLogoUrl, setExistingLogoUrl] = useState<string | null>(null);
   const [existingLogoId, setExistingLogoId] = useState<string | null>(null);
@@ -77,25 +79,7 @@ const EditReinsurer = () => {
       setIsLoading(true);
       setLoadError(null);
       try {
-        const [c, r, z, data] = await Promise.all([
-          listMasterCountries(),
-          listMasterRegions(),
-          listMasterZones(),
-          getReinsurer(reinsurerMapId),
-        ]);
-        setMasterCountries(c);
-        setMasterRegions(r);
-        setMasterZones(z);
-
-        const countryIds = (data.geoCoverage?.countries || [])
-          .map((co) => co.id)
-          .filter((v): v is string => Boolean(v));
-        const regionIds = (data.geoCoverage?.regions || [])
-          .map((reg) => reg.id)
-          .filter((v): v is string => Boolean(v));
-        const zoneIds = (data.geoCoverage?.zones || [])
-          .map((zo) => zo.id)
-          .filter((v): v is string => Boolean(v));
+        const data = await getReinsurer(reinsurerMapId);
 
         const logoUrl = data.companyLogo || null;
         setExistingLogoUrl(logoUrl);
@@ -114,13 +98,12 @@ const EditReinsurer = () => {
           email: data.email || "",
           phone: data.phone || "",
           address: data.address || "",
-          countries: countryIds,
-          regions: regionIds,
-          zones: zoneIds,
           adminUserName: data.adminName || "",
           adminUserEmail: data.adminEmail || "",
           adminUserPassword: "",
           status: data.status,
+          riskAppetite: data.riskAppetite,
+          facultativeContacts: data.facultativeContacts,
         });
         setIsActive(data.status?.toLowerCase() !== "inactive");
       } catch (err: unknown) {
@@ -183,18 +166,6 @@ const EditReinsurer = () => {
         }
       }
 
-      const selectedCountryObjects = (formData.countries || [])
-        .map((id) => masterCountries.find((co) => co.id === id))
-        .filter((v): v is (typeof masterCountries)[number] => Boolean(v));
-
-      const selectedRegionObjects = (formData.regions || [])
-        .map((id) => masterRegions.find((reg) => reg.id === id))
-        .filter((v): v is (typeof masterRegions)[number] => Boolean(v));
-
-      const selectedZoneObjects = (formData.zones || [])
-        .map((id) => masterZones.find((zo) => zo.id === id))
-        .filter((v): v is (typeof masterZones)[number] => Boolean(v));
-
       const payload: UpdateReinsurerRequest = {
         name: formData.name,
         gradeId: formData.gradeId,
@@ -202,31 +173,13 @@ const EditReinsurer = () => {
         contactEmail: formData.email,
         phone: formData.phone,
         address: formData.address,
-        operatingCountries: selectedCountryObjects.map((co) => ({
-          id: co.id,
-          value: co.value,
-          label: co.label,
-          active: true,
-        })),
-        operatingRegions: selectedRegionObjects.map((reg) => ({
-          id: reg.id,
-          value: reg.value,
-          label: reg.label,
-          countryId: reg.countryId,
-          active: true,
-        })),
-        operatingZones: selectedZoneObjects.map((zo) => ({
-          id: zo.id,
-          value: zo.value,
-          label: zo.label,
-          regionId: zo.regionId,
-          active: true,
-        })),
         adminEmail: formData.adminUserEmail,
         adminName: formData.adminUserName,
         adminPassword: formData.adminUserPassword || undefined,
         companyLogo: finalLogoUrl ?? null,
         companyLogoId: finalLogoId ?? null,
+        riskAppetite: buildRiskAppetitePayload(formData),
+        facultativeContacts: buildFacultativeContactsPayload(formData),
       };
 
       await updateReinsurer(reinsurerMapId, payload);
@@ -302,6 +255,18 @@ const EditReinsurer = () => {
     setPendingStatus(null);
   };
 
+  const logoPreviewSrc = useMemo(() => {
+    if (logoFile) return URL.createObjectURL(logoFile);
+    return existingLogoUrl;
+  }, [logoFile, existingLogoUrl]);
+
+  useEffect(() => {
+    if (!logoFile || !logoPreviewSrc?.startsWith("blob:")) return;
+    return () => URL.revokeObjectURL(logoPreviewSrc);
+  }, [logoFile, logoPreviewSrc]);
+
+  const logoName = logoFile ? logoFile.name : "Current Logo";
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-background to-secondary/20 flex flex-col cityscape-bg">
@@ -336,9 +301,6 @@ const EditReinsurer = () => {
       </div>
     );
   }
-
-  const logoPreviewSrc = logoFile ? URL.createObjectURL(logoFile) : existingLogoUrl;
-  const logoName = logoFile ? logoFile.name : "Current Logo";
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background to-secondary/20 flex flex-col cityscape-bg">
@@ -422,9 +384,6 @@ const EditReinsurer = () => {
                           src={logoPreviewSrc}
                           alt="Logo Preview"
                           className="w-full h-full object-cover"
-                          onLoad={(e) => {
-                            if (logoFile) URL.revokeObjectURL((e.target as HTMLImageElement).src);
-                          }}
                           onError={(e) => {
                             (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
                               reinsurerData?.name || "R",

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type TabValue = "quotes" | "referrals" | "policies" | "endorsements";
+export type TabValue = "quotes" | "referrals" | "fac-in" | "policies" | "endorsements";
 
 export interface InsurerDashboardState {
   activeTab: TabValue;

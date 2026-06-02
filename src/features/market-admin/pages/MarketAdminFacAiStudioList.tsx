@@ -10,9 +10,11 @@ import { Input } from '@/components/ui/input';
 export type FacAiStudioProductSummary = {
   id: string;
   name: string;
-  role: string;
   agentEmail: string;
+  /** Labels shown on the list (chips). */
   businessTypes: string[];
+  /** `value` codes from Product Category master — same as Product Studio. */
+  categoryCodes: string[];
   updatedAtLabel: string;
   triggerPreview: string;
 };
@@ -20,19 +22,19 @@ export type FacAiStudioProductSummary = {
 export const DEMO_FAC_AI_PRODUCTS: FacAiStudioProductSummary[] = [
   {
     id: 'fac-ai-pi-agent',
-    name: 'pi agent',
-    role: 'Analyst',
+    name: 'Professional Indemnity',
     agentEmail: 'quote@aurainsure.tech',
-    businessTypes: ['Casualty'],
+    businessTypes: ['Liability', 'Professional'],
+    categoryCodes: ['LIABILITY', 'PROFESSIONAL'],
     updatedAtLabel: 'Demo · 07 May 2026',
     triggerPreview: 'retech or fac-support or riyadh re',
   },
   {
     id: 'fac-ai-marine-router',
     name: 'Marine Fac Intake',
-    role: 'Placement Coordinator',
     agentEmail: 'marine-fac@aurainsure.tech',
-    businessTypes: ['Marine', 'Property'],
+    businessTypes: ['Marine Cargo', 'Property'],
+    categoryCodes: ['MARINE_CARGO', 'PROPERTY'],
     updatedAtLabel: 'Demo · 06 May 2026',
     triggerPreview: 'marine cargo slip or berth exposure',
   },
@@ -46,12 +48,12 @@ export default function MarketAdminFacAiStudioList() {
     const t = q.trim().toLowerCase();
     if (!t) return DEMO_FAC_AI_PRODUCTS;
     return DEMO_FAC_AI_PRODUCTS.filter((row) =>
-      [row.name, row.role, row.agentEmail, row.triggerPreview, ...row.businessTypes].join(' ').toLowerCase().includes(t),
+      [row.name, row.agentEmail, row.triggerPreview, ...row.businessTypes].join(' ').toLowerCase().includes(t),
     );
   }, [q]);
 
   return (
-    <div className="min-h-full bg-background p-6">
+    <div className="min-h-full bg-background px-3 sm:px-4 py-6">
       <div className="mx-auto max-w-6xl space-y-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -71,7 +73,7 @@ export default function MarketAdminFacAiStudioList() {
           <Input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search products by name, role, email, trigger…"
+            placeholder="Search products by name, email, trigger, categories…"
             className="pl-9"
           />
         </div>
@@ -86,11 +88,10 @@ export default function MarketAdminFacAiStudioList() {
                       <Bot className="h-5 w-5" />
                     </div>
                     <div>
-                      <CardTitle className="text-lg capitalize">{p.name}</CardTitle>
+                      <CardTitle className="text-lg">{p.name}</CardTitle>
                       <CardDescription className="text-xs">{p.updatedAtLabel}</CardDescription>
                     </div>
                   </div>
-                  <Badge variant="secondary">{p.role}</Badge>
                 </div>
               </CardHeader>
               <CardContent className="space-y-3 pt-0">
@@ -99,7 +100,7 @@ export default function MarketAdminFacAiStudioList() {
                   <p className="text-sm font-medium text-foreground">{p.agentEmail}</p>
                 </div>
                 <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Business types</p>
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Categories</p>
                   <div className="mt-1 flex flex-wrap gap-1">
                     {p.businessTypes.map((bt) => (
                       <Badge key={bt} variant="outline" className="font-normal">

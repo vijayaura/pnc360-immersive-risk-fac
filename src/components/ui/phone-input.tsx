@@ -21,6 +21,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 
 type CountryIso2 = "ae" | "sa" | "us" | "gb" | "in" | (string & {});
 
+const UAE_ISO2 = "ae" as const;
+
 export interface PhoneInputProps
   extends Omit<RIPPhoneInputProps, "value" | "onChange" | "defaultCountry"> {
   value: string;
@@ -37,7 +39,7 @@ const PhoneInput = React.forwardRef<HTMLInputElement, PhoneInputProps>(
       value,
       onChange,
       error,
-      defaultCountry,
+      defaultCountry = UAE_ISO2,
       countries = defaultCountries,
       disabled,
       placeholder,
@@ -47,7 +49,7 @@ const PhoneInput = React.forwardRef<HTMLInputElement, PhoneInputProps>(
       onBlur,
       onFocus,
       inputProps,
-      preferredCountries,
+      preferredCountries = [UAE_ISO2],
       compact,
       ...rest
     },
@@ -59,11 +61,16 @@ const PhoneInput = React.forwardRef<HTMLInputElement, PhoneInputProps>(
 
     React.useImperativeHandle(ref, () => innerRef.current as HTMLInputElement | null);
 
+    const orderedPreferredCountries = React.useMemo(
+      () => [UAE_ISO2, ...preferredCountries.filter((c) => c !== UAE_ISO2)],
+      [preferredCountries],
+    );
+
     const { inputValue, handlePhoneValueChange, country, setCountry } = usePhoneInput({
       value,
       defaultCountry,
       countries,
-      preferredCountries,
+      preferredCountries: orderedPreferredCountries,
       onChange: ({ phone }) => onChange(phone),
       inputRef: innerRef,
       // National digits in the text field; full E.164 still passed to onChange (libphonenumber-compatible).
@@ -80,9 +87,16 @@ const PhoneInput = React.forwardRef<HTMLInputElement, PhoneInputProps>(
       const query = searchTerm.trim().toLowerCase();
       const numericQuery = query.replace(/\D/g, "");
 
-      if (!query) return parsedCountries;
+      const sortUaeFirst = (items: ReturnType<typeof parseCountry>[]) => {
+        const uae = items.find((item) => item.iso2 === UAE_ISO2);
+        if (!uae) return items;
+        return [uae, ...items.filter((item) => item.iso2 !== UAE_ISO2)];
+      };
 
-      return parsedCountries.filter((item) => {
+      if (!query) return sortUaeFirst(parsedCountries);
+
+      return sortUaeFirst(
+        parsedCountries.filter((item) => {
         const countryName = item.name.toLowerCase();
         const iso2 = item.iso2.toLowerCase();
         const dialCode = item.dialCode.toLowerCase();
@@ -100,7 +114,8 @@ const PhoneInput = React.forwardRef<HTMLInputElement, PhoneInputProps>(
           (dialCode.startsWith(numericQuery) || `+${dialCode}`.startsWith(query));
 
         return matchesName || matchesIso2 || matchesDialCode;
-      });
+        }),
+      );
     }, [parsedCountries, searchTerm]);
 
     React.useEffect(() => {

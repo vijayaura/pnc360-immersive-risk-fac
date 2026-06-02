@@ -17,9 +17,11 @@ export interface MarketTheme {
  */
 const DEFAULT_THEME = {
   primary: "213 78% 74%",
+  primaryForeground: "213 25% 29%",
   primaryHover: "213 78% 68%",
   primaryLight: "213 88% 94%",
   accent: "213 78% 74%",
+  accentForeground: "213 25% 29%",
   muted: "213 88% 95%",
   secondary: "213 88% 95%",
   border: "213 88% 90%",
@@ -82,6 +84,13 @@ function hexToHsl(hex: string): { h: number; s: number; l: number } | null {
 }
 
 /**
+ * Pick readable label color for a solid primary fill.
+ */
+function foregroundForPrimaryLightness(l: number): string {
+  return l >= 55 ? "213 25% 29%" : "0 0% 100%";
+}
+
+/**
  * Generate complementary colors from a primary color (HEX or HSL)
  */
 function generateThemeColors(primaryColor: string) {
@@ -105,9 +114,11 @@ function generateThemeColors(primaryColor: string) {
 
   return {
     primary: `${h} ${s}% ${l}%`,
+    primaryForeground: foregroundForPrimaryLightness(l),
     primaryHover: `${h} ${s}% ${Math.max(l - 6, 20)}%`,
     primaryLight: `${h} ${Math.min(s + 10, 100)}% ${Math.min(l + 20, 95)}%`,
     accent: `${h} ${s}% ${l}%`,
+    accentForeground: foregroundForPrimaryLightness(l),
     // Muted and secondary use a very light tint of the theme hue — used by skeleton loaders
     muted: `${h} ${Math.min(s + 10, 60)}% 95%`,
     secondary: `${h} ${Math.min(s + 10, 60)}% 95%`,
@@ -140,9 +151,11 @@ export function applyMarketTheme(theme: MarketTheme | null): void {
 
   // Set CSS variables
   root.style.setProperty("--primary", colors.primary);
+  root.style.setProperty("--primary-foreground", colors.primaryForeground);
   root.style.setProperty("--primary-hover", colors.primaryHover);
   root.style.setProperty("--primary-light", colors.primaryLight);
   root.style.setProperty("--accent", colors.accent);
+  root.style.setProperty("--accent-foreground", colors.accentForeground);
   // Muted & secondary drive skeleton loader colors — must match theme hue
   root.style.setProperty("--muted", colors.muted);
   root.style.setProperty("--secondary", colors.secondary);
@@ -173,9 +186,11 @@ export function clearMarketTheme(): void {
 
   // Remove inline styles
   root.style.removeProperty("--primary");
+  root.style.removeProperty("--primary-foreground");
   root.style.removeProperty("--primary-hover");
   root.style.removeProperty("--primary-light");
   root.style.removeProperty("--accent");
+  root.style.removeProperty("--accent-foreground");
   root.style.removeProperty("--muted");
   root.style.removeProperty("--secondary");
   root.style.removeProperty("--border");
@@ -225,9 +240,11 @@ export function applySuperAdminTheme(): void {
   const root = document.documentElement;
 
   root.style.setProperty("--primary", colors.primary);
+  root.style.setProperty("--primary-foreground", colors.primaryForeground);
   root.style.setProperty("--primary-hover", colors.primaryHover);
   root.style.setProperty("--primary-light", colors.primaryLight);
   root.style.setProperty("--accent", colors.accent);
+  root.style.setProperty("--accent-foreground", colors.accentForeground);
   // Muted & secondary drive skeleton loader colors — must match theme hue
   root.style.setProperty("--muted", colors.muted);
   root.style.setProperty("--secondary", colors.secondary);

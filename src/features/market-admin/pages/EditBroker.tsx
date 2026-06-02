@@ -42,7 +42,6 @@ import {
 } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 
-import GeographicCoverage from '@/components/shared/GeographicCoverage';
 import { useToast } from '@/shared/hooks/use-toast';
 import { getBroker, setBrokerStatus } from '@/features/brokers/api/brokers';;
 import {
@@ -54,7 +53,7 @@ import { useAuthStore } from '@/shared/stores/useAuthStore';
 import FormSkeleton from '@/components/loaders/FormSkeleton';
 import { formatFileSize } from '@/shared/utils/fileUtils';
 import { validatePhone } from '@/lib/phone/phone-validation';
-import { listMasterCountries, listMasterRegions, listMasterZones, type Country, type Region, type Zone } from '@/features/product-config/masters/api/masters';
+
 const editBrokerSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
   email: z.string().email('Invalid email address'),
@@ -67,10 +66,6 @@ const editBrokerSchema = z.object({
   licenseNumber: z.string().min(1, 'License number is required'),
   validityStartDate: z.string().min(1, 'Validity start date is required'),
   validityEndDate: z.string().min(1, 'Validity end date is required'),
-  // Geographic coverage - mandatory
-  countries: z.array(z.string()).min(1, 'At least one country is required'),
-  regions: z.array(z.string()).min(1, 'At least one region is required'),
-  zones: z.array(z.string()).min(1, 'At least one zone is required'),
   adminName: z.string().min(2, 'Admin name must be at least 2 characters'),
   // Admin email/password should not be edited from this screen; keep them optional to avoid validation issues.
   adminUserEmail: z.string().email('Invalid admin email address').optional().or(z.literal('')),
@@ -88,11 +83,6 @@ const EditBroker = () => {
   const { toast } = useToast();
   const { user } = useAuthStore();
   const { brokerId } = useParams<{ brokerId: string }>();
-  const [selectedCountries, setSelectedCountries] = useState<string[]>([]);
-  const [selectedRegions, setSelectedRegions] = useState<string[]>([]);
-  const [selectedZones, setSelectedZones] = useState<string[]>([]);
-  const [availableRegions, setAvailableRegions] = useState<Region[]>([]);
-  const [availableZones, setAvailableZones] = useState<Zone[]>([]);
   const [licenseFile, setLicenseFile] = useState<File | null>(null);
   const [licenseFileUrl, setLicenseFileUrl] = useState<string | null>(null);
   const [licenseFileId, setLicenseFileId] = useState<string | null>(null);
@@ -111,11 +101,6 @@ const EditBroker = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  const [countries, setCountries] = useState<Country[]>([]);
-  const [allRegions, setAllRegions] = useState<Region[]>([]);
-  const [allZones, setAllZones] = useState<Zone[]>([]);
-  const [mastersLoading, setMastersLoading] = useState<boolean>(true);
-  const [mastersError, setMastersError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [initialLoaded, setInitialLoaded] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -131,9 +116,6 @@ const EditBroker = () => {
       licenseNumber: '',
       validityStartDate: '',
       validityEndDate: '',
-      countries: [],
-      regions: [],
-      zones: [],
       adminName: '',
       adminUserEmail: '',
       adminUserPassword: '',
@@ -142,109 +124,14 @@ const EditBroker = () => {
 
   // Load broker data from API
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      setMastersLoading(true);
-      setMastersError(null);
-      try {
-        const [c, r, z] = await Promise.all([
-          listMasterCountries(),
-          listMasterRegions(),
-          listMasterZones(),
-        ]);
-        if (!mounted) return;
-        setCountries(c);
-        setAllRegions(r);
-        setAllZones(z);
-      } catch (err: any) {
-        if (!mounted) return;
-        const status = err?.status;
-        const friendly =
-          status === 400
-            ? 'Invalid request while loading masters.'
-            : status === 401
-              ? 'Session expired. Please log in again.'
-              : status === 403
-                ? 'You are not authorized to load masters.'
-                : status === 500
-                  ? 'Server error while fetching masters.'
-                  : err?.message || 'Failed to load masters.';
-        setMastersError(friendly);
-      } finally {
-        if (mounted) setMastersLoading(false);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  useEffect(() => {
     const load = async () => {
-      if (!brokerId || mastersLoading || lastFetchedIdRef.current === brokerId) return;
+      if (!brokerId || lastFetchedIdRef.current === brokerId) return;
       lastFetchedIdRef.current = brokerId;
 
       setIsLoading(true);
       setLoadError(null);
       try {
         const data = await getBroker(brokerId);
-        // Normalized compare helper
-        const norm = (s: string | null | undefined) => (s || '').toString().trim().toLowerCase();
-
-        // Handle new API structure with geoCoverage object
-        const apiCountries = data.geoCoverage?.countries || data.operatingCountries || [];
-        const apiRegions = data.geoCoverage?.regions || data.operatingRegions || [];
-        const apiZones = data.geoCoverage?.zones || data.operatingZones || [];
-
-        // Map countries - handle both new structure (objects with id) and old structure (strings)
-        const preCountryIds = apiCountries
-          .map((item: any) => {
-            if (typeof item === 'string') {
-              return countries.find((c) => norm(c.label) === norm(item))?.id;
-            }
-            // Match by label first to get the Master ID, as API ID might be assignment ID
-            const matched = countries.find((c) => norm(c.label) === norm(item.label || item.value));
-            return matched?.id || item.id;
-          })
-          .filter((v): v is string => typeof v === 'string');
-
-        // Map regions - handle both structures
-        const preRegionIds = apiRegions
-          .map((item: any) => {
-            if (typeof item === 'string') {
-              return allRegions.find((r) => norm(r.label) === norm(item))?.id;
-            }
-            // Match by label first
-            const matched = allRegions.find(
-              (r) => norm(r.label) === norm(item.label || item.value || item.name),
-            );
-            return matched?.id || item.id;
-          })
-          .filter((v): v is string => typeof v === 'string');
-
-        // Map zones - handle both structures
-        const preZoneIds = apiZones
-          .map((item: any) => {
-            if (typeof item === 'string') {
-              return allZones.find((z) => norm(z.label) === norm(item))?.id;
-            }
-            // Match by label first
-            const matched = allZones.find(
-              (z) => norm(z.label) === norm(item.label || item.value || item.name),
-            );
-            return matched?.id || item.id;
-          })
-          .filter((v): v is string => typeof v === 'string');
-
-        // Initialize available lists based on selections
-        let initRegions = allRegions.filter((r) => preCountryIds.includes(r.countryId));
-        if (initRegions.length === 0 && preRegionIds.length > 0) {
-          initRegions = allRegions.filter((r) => preRegionIds.includes(r.id));
-        }
-        let initZones = allZones.filter((z) => preRegionIds.includes(z.regionId));
-        if (initZones.length === 0 && preZoneIds.length > 0) {
-          initZones = allZones.filter((z) => preZoneIds.includes(z.id));
-        }
 
         const licenseNumber = data.license?.licenseNumber || '';
         const validityStart = data.license?.validityStart || '';
@@ -257,9 +144,6 @@ const EditBroker = () => {
           licenseNumber: licenseNumber,
           validityStartDate: validityStart ? validityStart.slice(0, 10) : '',
           validityEndDate: validityEnd ? validityEnd.slice(0, 10) : '',
-          countries: preCountryIds,
-          regions: preRegionIds,
-          zones: preZoneIds,
           adminName: data.adminName || '',
           adminUserEmail: data.adminEmail || data.contact?.adminEmail || '',
           adminUserPassword: '',
@@ -268,11 +152,6 @@ const EditBroker = () => {
         form.reset(initialValues);
         initialFormValuesRef.current = initialValues;
         setIsActive((data.status.toLowerCase() || 'active') === 'active' ? true : false);
-        setSelectedCountries(preCountryIds);
-        setSelectedRegions(preRegionIds);
-        setSelectedZones(preZoneIds);
-        setAvailableRegions(initRegions);
-        setAvailableZones(initZones);
 
         // Populate existing files
         if (data.branding?.logoFileUrl) {
@@ -308,34 +187,7 @@ const EditBroker = () => {
       }
     };
     load();
-  }, [brokerId, mastersLoading, countries, allRegions, allZones]);
-
-  // Update available regions when countries change
-  const handleCountryChange = (countryIds: string[]) => {
-    setSelectedCountries(countryIds);
-    const regions = allRegions.filter((r) => countryIds.includes(r.countryId));
-    setAvailableRegions(regions);
-    // Reset regions and zones if no countries selected
-    if (countryIds.length === 0) {
-      form.setValue('regions', []);
-      form.setValue('zones', []);
-      setSelectedRegions([]);
-      setSelectedZones([]);
-      setAvailableZones([]);
-    }
-  };
-
-  const handleRegionChange = (regionIds: string[]) => {
-    setSelectedRegions(regionIds);
-    const zones = allZones.filter((z) => regionIds.includes(z.regionId));
-    setAvailableZones(zones);
-    form.setValue('regions', regionIds);
-    // Reset zones if no regions selected
-    if (regionIds.length === 0) {
-      form.setValue('zones', []);
-      setSelectedZones([]);
-    }
-  };
+  }, [brokerId]);
 
   const handleToggleStatus = () => {
     const newStatus = !isActive;
@@ -414,86 +266,10 @@ const EditBroker = () => {
     try {
       if (!brokerId) throw new Error('Missing broker id');
 
-      // Build operating coverage with correct structure
-      const operatingCountries = (values.countries || [])
-        .map((id) => {
-          const c = countries.find((cn) => cn.id === id);
-          if (!c) return null;
-          return {
-            id: c.id,
-            value: c.value,
-            label: c.label,
-            countryId: null,
-            active: c.active,
-          };
-        })
-        .filter(
-          (
-            v,
-          ): v is {
-            id: string;
-            value: string;
-            label: string;
-            countryId: null;
-            active: boolean;
-          } => Boolean(v),
-        );
-
-      const operatingRegions = (values.regions || [])
-        .map((id) => {
-          const r = allRegions.find((reg) => reg.id === id);
-          if (!r) return null;
-          return {
-            id: r.id,
-            value: r.value,
-            label: r.label,
-            countryId: r.countryId,
-            active: r.active,
-          };
-        })
-        .filter(
-          (
-            v,
-          ): v is {
-            id: string;
-            value: string;
-            label: string;
-            countryId: string;
-            active: boolean;
-          } => Boolean(v),
-        );
-
-      const operatingZones = (values.zones || [])
-        .map((id) => {
-          const z = allZones.find((zn) => zn.id === id);
-          if (!z) return null;
-          return {
-            id: z.id,
-            value: z.value,
-            label: z.label,
-            regionId: z.regionId,
-            active: z.active,
-          };
-        })
-        .filter(
-          (
-            v,
-          ): v is {
-            id: string;
-            value: string;
-            label: string;
-            regionId: string;
-            active: boolean;
-          } => Boolean(v),
-        );
-
       const payload: UpdateBrokerManagementRequest = {
         name: values.name,
         adminName: values.adminName,
         contactNumber: values.phone,
-        operatingCountries: operatingCountries.length ? operatingCountries : undefined,
-        operatingRegions: operatingRegions.length ? operatingRegions : undefined,
-        operatingZones: operatingZones.length ? operatingZones : undefined,
       };
 
       if (values.email) {
@@ -1188,33 +964,6 @@ const EditBroker = () => {
                         )}
                       </div>
                     </div>
-
-                    {/* Geographic Coverage Section */}
-                    <GeographicCoverage
-                      countries={countries}
-                      regions={allRegions}
-                      zones={allZones}
-                      selectedCountries={selectedCountries}
-                      selectedRegions={selectedRegions}
-                      selectedZones={selectedZones}
-                      onCountriesChange={(ids) => {
-                        form.setValue('countries', ids, { shouldValidate: true });
-                        handleCountryChange(ids);
-                      }}
-                      onRegionsChange={(ids) => {
-                        form.setValue('regions', ids, { shouldValidate: true });
-                        handleRegionChange(ids);
-                      }}
-                      onZonesChange={(ids) => {
-                        form.setValue('zones', ids, { shouldValidate: true });
-                        setSelectedZones(ids);
-                      }}
-                      required={true}
-                      showTitle={true}
-                      countriesError={form.formState.errors.countries?.message}
-                      regionsError={form.formState.errors.regions?.message}
-                      zonesError={form.formState.errors.zones?.message}
-                    />
 
                     </fieldset>
                     <div className="flex gap-4 pt-6">
