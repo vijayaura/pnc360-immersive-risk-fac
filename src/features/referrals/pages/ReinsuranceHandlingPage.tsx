@@ -593,24 +593,6 @@ function ReinsuranceHandlingPage() {
   const updateFacModalDraft = useCallback((updater: React.SetStateAction<FacultativeArrangeDraft | null>) => {
     setFacModalDraft(updater);
   }, []);
-  const openArrangeFacModal = useCallback(() => {
-    const ts = Date.now();
-    updateFacModalDraft({
-      id: `fac-${ts}`,
-      cededSumInsured: 0,
-      rows: [
-        {
-          id: `new-${ts}`,
-          reinsurerId: '',
-          name: '',
-          sharePercent: 0,
-          commissionPercent: 0,
-        },
-      ],
-      isNew: true,
-      flow: 'need',
-    });
-  }, [updateFacModalDraft]);
   // Editing state for inline fac cards
   const [editingFacLayerId, setEditingFacLayerId] = useState<string | null>(null);
   const hasInitializedRef = useRef(false);
@@ -1612,23 +1594,14 @@ function ReinsuranceHandlingPage() {
                 onClick={() => setFacNewRequestOpen(true)}
               >
                 <Plus className="h-4 w-4" />
-                Facultative New
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-2"
-                onClick={() => openArrangeFacModal()}
-              >
-                <Plus className="h-4 w-4" />
-                Need Facultative
+                FAC Out
               </Button>
             </div>
           </div>
           {allocations.length === 0 && userFacLayers.length === 0 && facOutreachCases.length === 0 && (
             <Card className="border-dashed">
               <CardContent className="py-6 text-center text-sm text-muted-foreground">
-                No treaties triggered. Use &quot;Facultative New&quot; or &quot;Need Facultative&quot; to arrange a case-by-case reinsurer panel.
+                No treaties triggered. Use &quot;FAC Out&quot; to arrange a case-by-case reinsurer panel.
               </CardContent>
             </Card>
           )}

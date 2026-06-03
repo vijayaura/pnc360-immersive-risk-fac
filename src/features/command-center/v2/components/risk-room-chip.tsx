@@ -83,6 +83,25 @@ export function renewalDeltaCardClass(delta: RenewalDelta) {
   }
 }
 
+export function riskBriefCardClass(delta: RenewalDelta, index = 0): string {
+  const proposalPalette = [
+    'border-l-teal-500 border-teal-200/80 bg-teal-50 text-teal-900',
+    'border-l-rose-500 border-rose-200/80 bg-rose-50 text-rose-900',
+    'border-l-amber-500 border-amber-200/80 bg-amber-50 text-amber-900',
+    'border-l-sky-500 border-sky-200/80 bg-sky-50 text-sky-900',
+  ];
+  const aiPalette = [
+    'border-l-indigo-500 border-indigo-200/80 bg-indigo-50 text-indigo-900',
+    'border-l-violet-500 border-violet-200/80 bg-violet-50 text-violet-900',
+    'border-l-fuchsia-500 border-fuchsia-200/80 bg-fuchsia-50 text-fuchsia-900',
+    'border-l-cyan-500 border-cyan-200/80 bg-cyan-50 text-cyan-900',
+    'border-l-orange-500 border-orange-200/80 bg-orange-50 text-orange-900',
+  ];
+
+  const palette = delta.source === 'ai' ? aiPalette : proposalPalette;
+  return cn('border border-l-[3px]', palette[index % palette.length]);
+}
+
 /** Switch track/thumb that stays visible on a solid primary row. */
 export const switchOnSolidPrimary =
   'data-[state=checked]:bg-primary-foreground/30 data-[state=unchecked]:bg-primary-foreground/15 [&>span]:bg-white [&>span]:data-[state=checked]:bg-primary-foreground';

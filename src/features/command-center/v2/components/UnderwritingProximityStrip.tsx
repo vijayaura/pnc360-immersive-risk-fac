@@ -133,9 +133,6 @@ export function UnderwritingProximityStrip() {
           <MapPinned className="h-4 w-4 text-foreground" />
           <div>
             <p className="text-xs font-bold text-foreground">Underwriting proximity</p>
-            <p className="text-[10px] text-foreground">
-              Response time for services · distance in metres for hazards & risk infrastructure
-            </p>
           </div>
         </div>
 
@@ -161,7 +158,7 @@ export function UnderwritingProximityStrip() {
       {isLoading ? (
         <div className="flex items-center gap-2 px-4 py-5 text-[11px] text-foreground">
           <Loader2 className="h-4 w-4 animate-spin text-foreground" />
-          Resolving OSM features & routes…
+          Resolving proximity data…
         </div>
       ) : (
         <div className="flex gap-3 overflow-x-auto p-3 snap-x snap-mandatory [-ms-overflow-style:none] [scrollbar-width:thin] [scrollbar-color:rgba(99,102,241,0.25)_transparent] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-indigo-400/30">

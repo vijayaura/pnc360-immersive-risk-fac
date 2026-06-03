@@ -188,6 +188,10 @@ export interface FacultativeDraftMailPreviewProps {
   quoteId?: string;
   cededSumInsured?: number;
   cededPremium?: number;
+  ratePerMille?: number;
+  commissionPercent?: number;
+  deductibles?: { allOtherPerils: string; naturalPerils: string };
+  includedCews?: { type: string; name: string; detail: string }[];
 }
 
 type DraftCoverRow = { cover: string; sumInsured: string; premium: string };
@@ -375,11 +379,32 @@ export function buildFacultativeDraftPlainText(props: FacultativeDraftMailPrevie
   if (displayPremium != null && displayPremium > 0) {
     lines.push(`Gross / quoted premium: ${fmtMoney(displayPremium, m.displayCurrency)}`);
   }
+  const { ratePerMille, commissionPercent, deductibles, includedCews } = props;
+
   if (cededSumInsured > 0) {
     lines.push(`Facultative ceded sum insured: ${fmtMoney(cededSumInsured, m.displayCurrency)}`);
     if (cededPremium > 0) {
-      lines.push(`Facultative ceded premium (derived): ${fmtMoney(cededPremium, m.displayCurrency)}`);
+      lines.push(`Facultative ceded premium: ${fmtMoney(cededPremium, m.displayCurrency)}`);
     }
+    if (ratePerMille != null && ratePerMille > 0) {
+      lines.push(`Technical rate: ${ratePerMille.toFixed(2)}‰`);
+    }
+    if (commissionPercent != null && commissionPercent > 0) {
+      lines.push(`Commission: ${commissionPercent}%`);
+    }
+  }
+  if (deductibles?.allOtherPerils?.trim()) {
+    lines.push(`Deductible — ${deductibles.allOtherPerils.trim()}`);
+  }
+  if (deductibles?.naturalPerils?.trim()) {
+    lines.push(`Deductible — ${deductibles.naturalPerils.trim()}`);
+  }
+  if (includedCews?.length) {
+    lines.push('');
+    lines.push('CLAUSES / CEWs', '────────────────');
+    includedCews.forEach((c, i) => {
+      lines.push(`${i + 1}. [${c.type}] ${c.name}${c.detail ? ` — ${c.detail}` : ''}`);
+    });
   }
   lines.push('Basis of cover and period: as per attached quote / proposal and reinsurance slip.');
   lines.push('');

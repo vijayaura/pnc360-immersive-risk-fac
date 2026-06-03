@@ -428,7 +428,7 @@ export function PersistentMapCanvas({ mapReady = true }: { mapReady?: boolean })
               })}
             >
               <Crosshair className="h-3.5 w-3.5 text-inherit" />
-              Spatial canvas
+              Site map
             </span>
             {MAP_LAYERS.filter((l) => l.group === 'hazard').map((layer) => (
               <LayerChip key={layer.id} layer={layer} active={mapLayers.has(layer.id)} onToggle={handleLayerToggle} />

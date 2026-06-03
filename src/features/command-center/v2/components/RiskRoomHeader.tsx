@@ -1,73 +1,116 @@
 import React from 'react';
 
 import {
-  ArrowDown,
   ArrowLeft,
-  ArrowUp,
   Brain,
-  ChevronDown,
+  Building2,
   CloudRain,
-  Droplets,
-  FileText,
-  Thermometer,
-  Wind,
+  Factory,
+  TrendingUp,
+  type LucideIcon,
 } from 'lucide-react';
 
 import { cn } from '@/shared/utils/lib-utils';
 
 import { rr } from '../risk-room-theme';
-import { RiskRoomChip, renewalDeltaCardClass, riskRoomChipClass } from './risk-room-chip';
-import { useLiveWeather, weatherCodeLabel } from '../hooks/useLiveWeather';
+import { RiskRoomChip } from './risk-room-chip';
 import { useRiskRoom } from '../RiskRoomContext';
 import { formatAED } from '../risk-room-data';
-import { RISK_LAYERS, type RenewalDelta } from '../types';
+import { RISK_LAYERS, type RiskLayerId } from '../types';
 
-const LAYER_IDLE = rr.layerIdle;
-const LAYER_ACTIVE = rr.layerActive;
+const LAYER_ICONS: Record<RiskLayerId, LucideIcon> = {
+  physical: Building2,
+  environmental: CloudRain,
+  operational: Factory,
+  financial: TrendingUp,
+  predictive: Brain,
+};
+
+const LAYER_CARD_STYLES: Record<
+  (typeof RISK_LAYERS)[number]['accent'],
+  { card: string; icon: string }
+> = {
+  sky: {
+    card: 'border-sky-700 bg-sky-600 text-white',
+    icon: 'bg-sky-500/50 text-white',
+  },
+  emerald: {
+    card: 'border-emerald-700 bg-emerald-600 text-white',
+    icon: 'bg-emerald-500/50 text-white',
+  },
+  amber: {
+    card: 'border-amber-700 bg-amber-600 text-white',
+    icon: 'bg-amber-500/50 text-white',
+  },
+  violet: {
+    card: 'border-violet-700 bg-violet-600 text-white',
+    icon: 'bg-violet-500/50 text-white',
+  },
+  indigo: {
+    card: 'border-indigo-700 bg-indigo-600 text-white',
+    icon: 'bg-indigo-500/50 text-white',
+  },
+};
 
 export function RiskLayerBar() {
   const { activeLayer, selectRiskLayer } = useRiskRoom();
 
   return (
-    <section className={cn('shrink-0 p-2.5 md:p-3', rr.card)}>
-      <p className={cn('mb-2 px-0.5', rr.labelCaps)}>Risk dimensions</p>
-      <div className="flex gap-2 overflow-x-auto pb-0.5 snap-x snap-mandatory [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {RISK_LAYERS.map((layer) => (
-          <button
-            key={layer.id}
-            type="button"
-            onClick={() => selectRiskLayer(layer.id)}
-            className={cn(
-              'min-w-[10.5rem] shrink-0 snap-start rounded-lg border px-3 py-2.5 text-left transition-all',
-              activeLayer === layer.id ? LAYER_ACTIVE : LAYER_IDLE,
-            )}
-          >
-            <p className="text-xs font-bold text-inherit">{layer.title}</p>
-            <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-inherit opacity-90">{layer.description}</p>
-          </button>
-        ))}
+    <section className="shrink-0">
+      <p className={cn('mb-3 px-0.5', rr.labelCaps)}>Risk dimensions</p>
+      <div className="flex gap-3 overflow-x-auto overscroll-x-contain px-1 py-2 snap-x snap-mandatory [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {RISK_LAYERS.map((layer) => {
+          const Icon = LAYER_ICONS[layer.id];
+          const styles = LAYER_CARD_STYLES[layer.accent];
+          const isActive = activeLayer === layer.id;
+
+          return (
+            <button
+              key={layer.id}
+              type="button"
+              onClick={() => selectRiskLayer(layer.id)}
+              className={cn(
+                'group flex min-w-[11.5rem] shrink-0 snap-start flex-col rounded-xl border px-4 py-3.5 text-left shadow-sm transition-all',
+                'hover:shadow-md hover:brightness-105',
+                styles.card,
+                isActive
+                  ? 'z-10 shadow-lg ring-2 ring-inset ring-white/50 brightness-110'
+                  : 'opacity-95 hover:opacity-100',
+              )}
+            >
+              <div className="mb-3 flex items-start justify-between gap-2">
+                <div
+                  className={cn(
+                    'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg shadow-inner',
+                    styles.icon,
+                  )}
+                >
+                  <Icon className="h-4 w-4" strokeWidth={2} />
+                </div>
+                {isActive && (
+                  <span className="rounded-full bg-white/20 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white">
+                    Active
+                  </span>
+                )}
+              </div>
+              <p className="text-sm font-bold leading-tight text-white">{layer.title}</p>
+              <p className="mt-1.5 line-clamp-2 text-xs leading-snug text-white/85">{layer.description}</p>
+            </button>
+          );
+        })}
       </div>
     </section>
   );
 }
 
-export function RiskRoomHeader({
-  onBack,
-  briefOpen,
-  onBriefToggle,
-}: {
-  onBack: () => void;
-  briefOpen: boolean;
-  onBriefToggle: () => void;
-}) {
+export function RiskRoomHeader({ onBack }: { onBack: () => void }) {
   const { property } = useRiskRoom();
-  const { data: weather, isLoading } = useLiveWeather(property.lat, property.lng);
 
   const scoreTone = property.riskScore >= 70 ? 'text-red-200' : undefined;
 
   return (
     <header className={cn('shrink-0', rr.header)}>
-      <div className="flex flex-wrap items-start gap-2 px-3 py-2.5 md:px-4">
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 md:px-4">
         <button
           type="button"
           onClick={onBack}
@@ -77,7 +120,7 @@ export function RiskRoomHeader({
           <ArrowLeft className="h-5 w-5" />
         </button>
 
-        <div className="hidden h-8 w-px self-center bg-border sm:block" />
+        <div className="hidden h-8 w-px shrink-0 self-center bg-border sm:block" />
 
         <div className="min-w-0 flex-1 basis-full sm:basis-auto">
           <h1 className={rr.pageTitle}>Underwriting referral</h1>
@@ -97,122 +140,11 @@ export function RiskRoomHeader({
           ))}
         </div>
 
-        <RiskRoomChip tone="default" size="md">
+        <RiskRoomChip tone="default" size="md" className="hidden sm:inline-flex">
           Lead UW
         </RiskRoomChip>
       </div>
-
-      <div className={cn('flex flex-wrap items-center gap-2 px-3 py-2 md:px-4', `border-t ${rr.divider}`)}>
-        <RiskRoomChip tone="muted" size="md" className="uppercase tracking-wider">
-          <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500/40" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-          </span>
-          Live
-        </RiskRoomChip>
-
-        {isLoading ? (
-          <span className="text-xs text-foreground">Loading weather…</span>
-        ) : weather ? (
-          <>
-            <LiveChip icon={Thermometer} label={`${Math.round(weather.temperatureC)}°C`} />
-            <LiveChip icon={Wind} label={`${weather.windMs.toFixed(1)} m/s`} />
-            <LiveChip icon={Droplets} label={`${weather.humidityPct}%`} />
-            <LiveChip icon={CloudRain} label={weatherCodeLabel(weather.weatherCode)} />
-          </>
-        ) : null}
-
-        <button
-          type="button"
-          onClick={onBriefToggle}
-          className={cn(
-            riskRoomChipClass({
-              size: 'md',
-              tone: 'muted',
-              className: cn('ml-auto cursor-pointer', briefOpen && 'font-semibold text-primary'),
-            }),
-          )}
-        >
-          Risk brief
-          <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', briefOpen && 'rotate-180')} />
-        </button>
-      </div>
-
-      {briefOpen && (
-        <div className={cn('space-y-2 px-3 py-2 md:px-4', `border-t ${rr.divider}`)}>
-          <RiskSignalGroup
-            title="Identified risks from proposal"
-            icon={FileText}
-            items={property.renewalDeltas.filter((d) => d.source === 'proposal')}
-          />
-
-          <RiskSignalGroup
-            title="AI-identified risks"
-            icon={Brain}
-            items={property.renewalDeltas.filter((d) => d.source === 'ai')}
-          />
-        </div>
-      )}
     </header>
-  );
-}
-
-function RiskSignalGroup({
-  title,
-  icon: Icon,
-  items,
-}: {
-  title: string;
-  icon: React.ComponentType<{ className?: string }>;
-  items: RenewalDelta[];
-}) {
-  if (items.length === 0) return null;
-
-  return (
-    <div>
-      <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-foreground">
-        <Icon className="h-3.5 w-3.5 shrink-0" />
-        {title}
-        <span className="font-normal normal-case tracking-normal text-foreground">· {items.length}</span>
-      </p>
-      <div className="flex gap-2 overflow-x-auto pb-0.5 snap-x snap-mandatory [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {items.map((d) => (
-          <article
-            key={d.label}
-            title={`${d.label}: ${d.value}`}
-            className={cn(
-              'flex w-[min(152px,68vw)] shrink-0 snap-start flex-col rounded-lg border px-2.5 py-1.5 shadow-sm transition-colors hover:shadow-md',
-              renewalDeltaCardClass(d),
-            )}
-          >
-            <p className="truncate text-[10px] font-semibold leading-tight opacity-90">{d.label}</p>
-            <p className="mt-0.5 flex items-center gap-1 text-xs font-bold leading-tight">
-              {d.direction === 'up' ? (
-                <ArrowUp className="h-3 w-3 shrink-0 opacity-90" aria-hidden />
-              ) : d.direction === 'down' ? (
-                <ArrowDown className="h-3 w-3 shrink-0 opacity-90" aria-hidden />
-              ) : null}
-              <span className="truncate">{d.value}</span>
-            </p>
-          </article>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function LiveChip({
-  icon: Icon,
-  label,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-}) {
-  return (
-    <RiskRoomChip tone="muted" size="md" className="tabular-nums">
-      <Icon className="h-3.5 w-3.5 text-foreground" />
-      {label}
-    </RiskRoomChip>
   );
 }
 

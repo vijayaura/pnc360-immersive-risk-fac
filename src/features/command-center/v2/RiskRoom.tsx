@@ -3,8 +3,6 @@ import { useNavigate } from 'react-router-dom';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-import { cn } from '@/shared/utils/lib-utils';
-
 import { CommandCenterProvider } from '../context/CommandCenterContext';
 
 import { ActionRail } from './components/ActionRail';
@@ -22,14 +20,11 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: false } },
 });
 
-function MapStage({ mapReady }: { mapReady: boolean }) {
+function ExperientialMapColumn({ mapReady }: { mapReady: boolean }) {
   return (
-    <div className="flex min-h-0 flex-col gap-3">
+    <div className="flex min-w-0 flex-col gap-3">
       <div>
         <h2 className={rr.sectionTitle}>Experiential underwriting</h2>
-        <p className={cn('mt-1', rr.subtext)}>
-          Spatial canvas, proximity intelligence, and risk dimensions at the property
-        </p>
       </div>
 
       <div className="relative h-[min(54.6vh,546px)] min-h-[364px] shrink-0 lg:h-[min(62.4vh,624px)]">
@@ -37,29 +32,38 @@ function MapStage({ mapReady }: { mapReady: boolean }) {
       </div>
 
       <UnderwritingProximityStrip />
+    </div>
+  );
+}
 
+function RiskDimensionsPanel() {
+  return (
+    <div className="flex w-full flex-col gap-3">
       <RiskLayerBar />
-
       <ContextDrawer />
     </div>
   );
 }
 
 function RiskRoomShell({ onClose, mapReady }: { onClose: () => void; mapReady: boolean }) {
-  const [briefOpen, setBriefOpen] = useState(true);
-
   return (
     <div className={`flex h-dvh min-h-0 flex-col overflow-hidden ${rr.page}`}>
-      <RiskRoomHeader onBack={onClose} briefOpen={briefOpen} onBriefToggle={() => setBriefOpen((o) => !o)} />
+      <RiskRoomHeader onBack={onClose} />
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
-        <div className="flex flex-col lg:flex-row">
-          <div className="min-w-0 flex-1 p-3 md:p-4 lg:pr-2">
-            <MapStage mapReady={mapReady} />
+        <div className="px-3 py-3 md:px-4 md:py-4">
+          <div className="relative">
+            <div className="flex flex-col lg:min-w-0 lg:pr-[calc(min(420px,38%)+0.75rem)]">
+              <ExperientialMapColumn mapReady={mapReady} />
+            </div>
+
+            <div className="mt-3 flex min-h-0 flex-col border-t border-border pt-3 lg:absolute lg:inset-y-0 lg:right-0 lg:mt-0 lg:w-[min(420px,38%)] lg:overflow-hidden lg:border-l lg:border-t-0 lg:pl-3 lg:pt-0">
+              <InsightRail />
+            </div>
           </div>
 
-          <div className="w-full shrink-0 border-t border-border p-3 md:p-4 lg:w-[min(420px,38%)] lg:border-l lg:border-t-0 lg:pl-2">
-            <InsightRail />
+          <div className="mt-3">
+            <RiskDimensionsPanel />
           </div>
         </div>
 

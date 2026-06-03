@@ -9,7 +9,6 @@ import {
   Eye,
   Phone,
   Network,
-  Handshake,
   type LucideIcon,
 } from 'lucide-react';
 import siteLogo from '@/assets/logo.png';
@@ -62,14 +61,6 @@ const PORTALS: PortalCard[] = [
     icon: Network,
     iconClassName: 'bg-primary/10 group-hover:bg-primary/20',
     route: '/reinsurer/login',
-    buttonClassName: 'bg-accent hover:bg-accent/90 text-accent-foreground',
-  },
-  {
-    title: 'Reinsurance Requester Portal',
-    description: 'Place facultative requests, manage referrals, and track bound policies.',
-    icon: Handshake,
-    iconClassName: 'bg-primary/10 group-hover:bg-primary/20',
-    route: '/reinsurer-broker/login',
     buttonClassName: 'bg-accent hover:bg-accent/90 text-accent-foreground',
   },
   {
@@ -157,7 +148,7 @@ const FlowSelection = () => {
             ))}
           </div>
 
-          <div className="grid w-full mx-auto grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 justify-items-center lg:max-w-[75%]">
+          <div className="grid w-full mx-auto grid-cols-1 sm:grid-cols-2 gap-4 justify-items-center lg:max-w-[50%]">
             {bottomRow.map((portal) => (
               <div key={portal.route} className="w-full max-w-sm lg:max-w-none">
                 <PortalCardItem portal={portal} onAccess={navigate} />

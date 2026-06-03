@@ -118,6 +118,7 @@ function compositeScoreBoxClasses(score: number) {
 export type WeatherYearRow = {
   year: string;
   rainfallMm: number;
+  floodIndex: number;
   maxWindMs: number;
   maxWindKmh: number;
   heatDaysOver42: number;
@@ -127,7 +128,7 @@ export type WeatherYearRow = {
   fogHoursProxy: number;
 };
 
-export type WeatherTrendMetricId = 'heat' | 'cloud' | 'rain' | 'storm' | 'wind' | 'fog';
+export type WeatherTrendMetricId = 'heat' | 'cloud' | 'rain' | 'flood' | 'storm' | 'wind' | 'fog';
 
 function weatherSeriesForProperty(property: Property): WeatherYearRow[] {
   const baseYear = 2022;
@@ -136,6 +137,17 @@ function weatherSeriesForProperty(property: Property): WeatherYearRow[] {
     const coastal = property.nearCoast ? 1.15 : 1;
     const industrial = property.nearIndustrial ? 1.08 : 1;
     const rainfallMm = Math.round((42 + i * 3 + property.riskScore * 0.08) * coastal * industrial);
+    const floodIndex = Math.min(
+      100,
+      Math.round(
+        8 +
+          i * 4 +
+          rainfallMm * 0.35 +
+          (property.floodZone ? 22 : 0) +
+          (coastal ? 8 : 0) +
+          (property.nearIndustrial ? 5 : 0),
+      ),
+    );
     const maxWindMs = Number((18 + i * 0.4 + (property.floodZone ? 2 : 0)).toFixed(1));
     const maxWindKmh = Math.round(maxWindMs * 3.6 * 10) / 10;
     const heatDaysOver42 = Math.round(12 + i + (property.type === 'industrial' ? 4 : 0));
@@ -163,6 +175,7 @@ function weatherSeriesForProperty(property: Property): WeatherYearRow[] {
     return {
       year: String(year),
       rainfallMm,
+      floodIndex,
       maxWindMs,
       maxWindKmh,
       heatDaysOver42,
@@ -218,6 +231,16 @@ const WEATHER_TREND_THEME: Record<
     fill: 'rgb(56, 189, 248)',
     yAxisLabel: 'Annual rainfall (mm)',
     valueSuffix: 'mm',
+    tickDecimals: 0,
+  },
+  flood: {
+    label: 'Flood exposure',
+    dataKey: 'floodIndex',
+    seriesName: 'Flood index',
+    stroke: 'rgb(14, 116, 144)',
+    fill: 'rgb(103, 232, 249)',
+    yAxisLabel: 'Flood exposure index',
+    valueSuffix: '',
     tickDecimals: 0,
   },
   storm: {
@@ -956,11 +979,6 @@ function AssessWeather({ property, immersive = false }: { property: Property; im
           <h3 className={cn('text-sm font-semibold', immersive ? 'text-slate-100' : 'text-foreground')}>
             Site weather & peril snapshot
           </h3>
-          <p className={cn('mt-1 max-w-xl text-xs', immersive ? 'text-slate-400' : 'text-foreground')}>
-            App-style hazard tiles with underwriting risk scores (demo). The trend control uses an SPC-style chart
-            (subgroup means by year) with center line and control limits; line and markers follow each hazard&apos;s
-            palette.
-          </p>
         </div>
         <div
           className={cn(
@@ -1046,7 +1064,7 @@ function AssessWeather({ property, immersive = false }: { property: Property; im
                 tick={{ fill: axisTick, fontSize: 11 }}
                 tickLine={{ stroke: axisStroke }}
                 label={{
-                  value: 'Year (subgroup)',
+                  value: 'Year',
                   position: 'insideBottom',
                   offset: -4,
                   fill: axisLabel,
@@ -1089,7 +1107,7 @@ function AssessWeather({ property, immersive = false }: { property: Property; im
                 stroke="#0f172a"
                 strokeWidth={1}
                 label={{
-                  value: 'Center line (mean)',
+                  value: 'Mean',
                   position: 'right',
                   fill: '#0f172a',
                   fontSize: 9,
@@ -1102,7 +1120,7 @@ function AssessWeather({ property, immersive = false }: { property: Property; im
                 strokeDasharray="6 5"
                 strokeWidth={1}
                 label={{
-                  value: 'Upper control limit (UCL)',
+                  value: 'Upper limit',
                   position: 'right',
                   fill: '#475569',
                   fontSize: 9,
@@ -1114,7 +1132,7 @@ function AssessWeather({ property, immersive = false }: { property: Property; im
                 strokeDasharray="6 5"
                 strokeWidth={1}
                 label={{
-                  value: 'Lower control limit (LCL)',
+                  value: 'Lower limit',
                   position: 'right',
                   fill: '#475569',
                   fontSize: 9,
@@ -1171,9 +1189,6 @@ function AssessWeather({ property, immersive = false }: { property: Property; im
               perilCards.reduce((s, c) => s + c.risk, 0) / (perilCards.length || 1),
             )}
           </p>
-          <p className={cn('mt-1 text-[11px]', immersive ? 'text-slate-500' : 'text-foreground')}>
-            Mean hazard across tiles (demo)
-          </p>
         </div>
       </div>
     </div>
@@ -1208,10 +1223,6 @@ function AssessBurningCost({ property, immersive = false }: { property: Property
           <h3 className={cn('text-base font-bold tracking-tight md:text-lg', immersive ? 'text-white' : 'text-foreground')}>
             Burning cost
           </h3>
-          <p className={cn('mt-1 max-w-2xl text-xs leading-relaxed', immersive ? 'text-slate-400' : 'text-foreground')}>
-            Historical burning cost (‰) by year against the book base rate — demo pricing view for{' '}
-            <span className={cn('font-medium', immersive ? 'text-slate-200' : 'text-foreground')}>{property.name}</span>.
-          </p>
         </div>
       </div>
 
@@ -1765,10 +1776,6 @@ function AssessNatCatModel({ property, immersive = false }: { property: Property
         )}
       >
         <p>
-          <span className={cn('font-semibold', immersive ? 'text-slate-100' : 'text-foreground')}>Model basis:</span>{' '}
-          UAE exposure curves · EUR EP2024 hazard blend (demo).
-        </p>
-        <p className="mt-2">
           <span className={cn('font-semibold', immersive ? 'text-slate-100' : 'text-foreground')}>Sum insured:</span>{' '}
           {siLabel}
           <span className={cn('mx-2', immersive ? 'text-slate-600' : 'text-slate-300')}>·</span>
@@ -2051,9 +2058,6 @@ function AssessRiskScoreFactors({ property, immersive = false }: { property: Pro
             )}
           >
             Composite
-          </p>
-          <p className={cn('text-xs leading-snug', immersive ? 'text-slate-400' : 'text-foreground')}>
-            Weighted blend of factor scores (demo calibration)
           </p>
         </div>
       </div>

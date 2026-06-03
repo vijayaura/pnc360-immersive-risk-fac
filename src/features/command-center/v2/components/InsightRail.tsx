@@ -10,6 +10,7 @@ import {
 
 import { cn } from '@/shared/utils/lib-utils';
 
+import { RiskBriefSection } from './RiskBriefSection';
 import { RiskRoomChip } from './risk-room-chip';
 import { useRiskRoom } from '../RiskRoomContext';
 import { rr } from '../risk-room-theme';
@@ -51,7 +52,7 @@ export function InsightRail() {
   const factors = factorBreakdown(property.riskScore, property.floors, property.nearIndustrial, property.nearCoast);
 
   return (
-    <aside className="flex flex-col gap-3 pb-4">
+    <aside className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] [scrollbar-width:thin]">
       <section className={cn('shrink-0 p-4', rr.cardLg)}>
         <p className={rr.labelCaps}>Composite risk</p>
         <div className="mt-3 flex items-center gap-4">
@@ -82,6 +83,8 @@ export function InsightRail() {
           ))}
         </div>
       </section>
+
+      <RiskBriefSection renewalDeltas={property.renewalDeltas} />
 
       {selectedClaimId && (
         <section className={cn('rounded-2xl border border-border p-4', rr.mutedPanel)}>
@@ -122,7 +125,6 @@ export function EvidenceInsightsStrip() {
           <Brain className="h-4 w-4 text-primary" />
           <div>
             <p className="text-sm font-bold text-foreground">Evidence-linked insights</p>
-            <p className="text-xs text-foreground">Scroll horizontally · accept or dismiss with source lineage</p>
           </div>
         </div>
         <span className="hidden shrink-0 text-xs text-foreground sm:inline">
@@ -239,7 +241,7 @@ function PeerBenchmarkStrip() {
   const { property } = useRiskRoom();
   return (
     <section className={cn('p-4', rr.cardLg)}>
-      <p className={rr.labelCaps}>Peer benchmark ghost</p>
+      <p className={rr.labelCaps}>Peer benchmark</p>
       <ul className="space-y-2">
         {property.peers.map((p) => (
           <li key={p.id} className="flex items-center justify-between text-xs">

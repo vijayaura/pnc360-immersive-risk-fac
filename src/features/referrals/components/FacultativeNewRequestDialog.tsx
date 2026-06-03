@@ -25,10 +25,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import { FormattedNumberInput } from '@/components/ui/FormattedNumberInput';
+import {
+  createDefaultFacPlacementTerms,
+  FacultativePlacementTermsFields,
+  type FacPlacementTermsState,
+} from '@/features/referrals/components/FacultativePlacementTermsFields';
 import {
   Table,
   TableBody,
@@ -40,9 +43,11 @@ import {
 import { listReinsuranceBrokers } from '@/features/reinsurance-brokers/api/reinsurance-brokers';
 import { listReinsurers } from '@/features/reinsurers/api/reinsurers';
 import { getReferralDetail, downloadReferralPdf } from '@/features/proposals/api/referrals';
+import { cn } from '@/shared/utils/lib-utils';
 import { useToast } from '@/shared/hooks/use-toast';
 import { buildFacultativeDraftPlainText } from '@/features/referrals/components/FacultativeDraftMailPreview';
 import { buildFacultativeReinsuranceSlipDocxBlob } from '@/features/referrals/utils/facultativeReinsuranceSlipDocx';
+import { mergeFacOutreachReinsuranceBrokers } from '@/features/referrals/fixtures/facOutreachReinsuranceBrokers';
 import {
   buildBrokerInsights,
   buildBrokerOverlapWarnings,
@@ -50,6 +55,11 @@ import {
   getBrokerMarketTags,
   type OutreachPartyInsights,
 } from '@/features/referrals/utils/facultativeOutreachInsights';
+import { mergeFacOutreachLimitedReinsurers } from '@/features/referrals/fixtures/facOutreachLimitedReinsurers';
+import {
+  assessReinsurerOutreachEligibility,
+  type OutreachLimitReason,
+} from '@/features/referrals/utils/facOutreachReinsurerEligibility';
 
 export type PartyKind = 'reinsurer' | 'reinsurance_broker' | 'insurer';
 
@@ -62,6 +72,9 @@ export interface FacultativeNewParty {
 
 interface OutreachRecipientRow extends FacultativeNewParty {
   insights: OutreachPartyInsights;
+  /** Reinsurers only — false = grey “other market” row, still selectable. */
+  outreachEligible?: boolean;
+  outreachLimitReasons?: OutreachLimitReason[];
 }
 
 function partyKey(p: Pick<FacultativeNewParty, 'kind' | 'id'>) {
@@ -86,7 +99,13 @@ const fmtAED = (n: number, currency = 'AED') =>
   ' ' +
   currency;
 
-function ConversionMetricsRow({ insights }: { insights: OutreachPartyInsights }) {
+function ConversionMetricsRow({
+  insights,
+  muted,
+}: {
+  insights: OutreachPartyInsights;
+  muted?: boolean;
+}) {
   const { sent, responses, placements } = insights.conversions;
   const responseRate = sent > 0 ? Math.round((responses / sent) * 100) : 0;
   const placementRate = sent > 0 ? Math.round((placements / sent) * 100) : 0;
@@ -106,7 +125,12 @@ function ConversionMetricsRow({ insights }: { insights: OutreachPartyInsights })
   ] as const;
 
   return (
-    <div className="min-w-0 flex-1 rounded-md border bg-muted/20 px-0.5 py-1">
+    <div
+      className={cn(
+        'min-w-0 flex-1 rounded-md border bg-muted/20 px-0.5 py-1 transition-opacity',
+        muted && 'border-border/50 bg-muted/10 opacity-55',
+      )}
+    >
       <div className="flex items-center divide-x divide-border/70">
         {metrics.map(({ icon: Icon, label, value, tone, valueClass }) => (
           <div
@@ -162,14 +186,22 @@ export function FacultativeNewRequestDialog({
   const [attachQuote, setAttachQuote] = useState(true);
   const [attachUwDocs, setAttachUwDocs] = useState(true);
   const [cededSumInsured, setCededSumInsured] = useState(0);
+  const [placementTerms, setPlacementTerms] = useState<FacPlacementTermsState>(() =>
+    createDefaultFacPlacementTerms(sumInsured, grossPremium, 0),
+  );
   const [attachmentDownloading, setAttachmentDownloading] = useState<string | null>(null);
   const [draftEmailBody, setDraftEmailBody] = useState('');
   const draftDirtyRef = useRef(false);
   const sendMapInitRef = useRef(false);
 
-  const cededPremiumDerived = useMemo(
-    () => (sumInsured > 0 ? grossPremium * (cededSumInsured / sumInsured) : 0),
-    [sumInsured, grossPremium, cededSumInsured],
+  const cededPremiumEffective = placementTerms.premium;
+
+  const includedCewsForDraft = useMemo(
+    () =>
+      placementTerms.cewItems
+        .filter((c) => placementTerms.includedCewIds.has(c.id))
+        .map((c) => ({ type: c.type, name: c.name, detail: c.detail })),
+    [placementTerms.cewItems, placementTerms.includedCewIds],
   );
 
   const referralQ = useQuery({
@@ -193,40 +225,93 @@ export function FacultativeNewRequestDialog({
     staleTime: 60_000,
   });
 
-  const loadingLists = open && (reinsurersQ.isLoading || brokersQ.isLoading);
+  const loadingLists = open && reinsurersQ.isLoading;
+  const brokersReady = !brokersQ.isLoading || brokersQ.isFetched;
+
+  const outreachBrokers = useMemo(
+    () => mergeFacOutreachReinsuranceBrokers(brokersQ.data?.data ?? []),
+    [brokersQ.data],
+  );
 
   const brokerOverlapWarnings = useMemo(() => {
-    const brokers = (brokersQ.data?.data ?? []).map((x) => ({
+    const brokers = outreachBrokers.map((x) => ({
       id: x.id,
       name: x.name,
       marketTags: getBrokerMarketTags(x),
       selected: !!sendMap[`reinsurance_broker:${x.id}`],
     }));
     return buildBrokerOverlapWarnings(brokers);
-  }, [brokersQ.data, sendMap]);
+  }, [outreachBrokers, sendMap]);
 
-  const reinsurerRows: OutreachRecipientRow[] = useMemo(
-    () =>
-      (reinsurersQ.data?.data ?? []).map((x) => ({
+  const outreachEligibilityCtx = useMemo(
+    () => ({
+      productName,
+      sumInsured,
+      cededSumInsured,
+      grossPremium,
+      cessionPremium: placementTerms.premium,
+      currency,
+    }),
+    [productName, sumInsured, cededSumInsured, grossPremium, placementTerms.premium, currency],
+  );
+
+  const { reinsurerEligibleRows, reinsurerIneligibleRows } = useMemo(() => {
+    const { directory, limited } = mergeFacOutreachLimitedReinsurers(
+      reinsurersQ.data?.data ?? [],
+      productName,
+    );
+
+    const eligible: OutreachRecipientRow[] = [];
+    const ineligible: OutreachRecipientRow[] = [];
+
+    for (const x of directory) {
+      const { eligible: isEligible, reasons } = assessReinsurerOutreachEligibility(x, outreachEligibilityCtx);
+      const row: OutreachRecipientRow = {
         kind: 'reinsurer' as const,
         id: x.id,
         name: x.name,
         email: x.adminEmail || undefined,
         insights: buildReinsurerInsights(x),
-      })),
-    [reinsurersQ.data],
+        outreachEligible: isEligible,
+        outreachLimitReasons: isEligible ? undefined : reasons,
+      };
+      if (isEligible) eligible.push(row);
+      else ineligible.push(row);
+    }
+
+    for (const x of limited) {
+      ineligible.push({
+        kind: 'reinsurer' as const,
+        id: x.id,
+        name: x.name,
+        email: x.adminEmail || undefined,
+        insights: buildReinsurerInsights(x),
+        outreachEligible: false,
+        outreachLimitReasons: x.outreachLimitReasons,
+      });
+    }
+
+    eligible.sort((a, b) => a.name.localeCompare(b.name));
+    ineligible.sort((a, b) => a.name.localeCompare(b.name));
+
+    return { reinsurerEligibleRows: eligible, reinsurerIneligibleRows: ineligible };
+  }, [reinsurersQ.data, productName, outreachEligibilityCtx]);
+
+  const reinsurerRows: OutreachRecipientRow[] = useMemo(
+    () => [...reinsurerEligibleRows, ...reinsurerIneligibleRows],
+    [reinsurerEligibleRows, reinsurerIneligibleRows],
   );
 
   const brokerRows: OutreachRecipientRow[] = useMemo(
     () =>
-      (brokersQ.data?.data ?? []).map((x) => ({
+      outreachBrokers.map((x) => ({
         kind: 'reinsurance_broker' as const,
         id: x.id,
         name: x.name,
         email: x.adminEmail || x.email || undefined,
         insights: buildBrokerInsights(x),
       })),
-    [brokersQ.data],
+    [outreachBrokers],
   );
 
   const parties: FacultativeNewParty[] = useMemo(
@@ -247,7 +332,11 @@ export function FacultativeNewRequestDialog({
         referralId,
         quoteId,
         cededSumInsured,
-        cededPremium: cededPremiumDerived,
+        cededPremium: cededPremiumEffective,
+        ratePerMille: placementTerms.ratePerMille,
+        commissionPercent: placementTerms.commissionPercent,
+        deductibles: placementTerms.deductibles,
+        includedCews: includedCewsForDraft,
       }),
     [
       referralQ.data,
@@ -260,7 +349,11 @@ export function FacultativeNewRequestDialog({
       referralId,
       quoteId,
       cededSumInsured,
-      cededPremiumDerived,
+      cededPremiumEffective,
+      placementTerms.ratePerMille,
+      placementTerms.commissionPercent,
+      placementTerms.deductibles,
+      includedCewsForDraft,
     ],
   );
 
@@ -278,20 +371,26 @@ export function FacultativeNewRequestDialog({
       setStep(1);
       setSendMap({});
       setCededSumInsured(0);
+      setPlacementTerms(createDefaultFacPlacementTerms(sumInsured, grossPremium, 0));
       setDraftEmailBody('');
       draftDirtyRef.current = false;
       sendMapInitRef.current = false;
       return;
     }
-    if (loadingLists || sendMapInitRef.current || parties.length === 0) return;
+    if (loadingLists || !brokersReady || sendMapInitRef.current || parties.length === 0) return;
 
     const init: Record<string, boolean> = {};
     parties.forEach((p) => {
-      init[partyKey(p)] = true;
+      if (p.kind === 'reinsurer') {
+        const row = reinsurerRows.find((r) => r.id === p.id);
+        init[partyKey(p)] = row?.outreachEligible !== false;
+      } else {
+        init[partyKey(p)] = true;
+      }
     });
     setSendMap(init);
     sendMapInitRef.current = true;
-  }, [open, loadingLists, parties]);
+  }, [open, loadingLists, brokersReady, parties, reinsurerRows]);
 
   const setSend = useCallback((key: string, value: boolean) => {
     setSendMap((prev) => ({ ...prev, [key]: value }));
@@ -459,6 +558,63 @@ export function FacultativeNewRequestDialog({
     onOpenChange(false);
   };
 
+  const renderEligibleRecipientRow = (p: OutreachRecipientRow, overlapWarning?: string) => {
+    const key = partyKey(p);
+    const isSelected = !!sendMap[key];
+    return (
+      <li key={key} className="px-4 py-2.5">
+        <div className="flex items-center gap-3">
+          <div className="w-40 shrink-0 min-w-0">
+            <p className="text-sm font-medium text-foreground truncate">{p.name}</p>
+            <p className="text-xs text-muted-foreground truncate">{p.email || 'No email on file'}</p>
+          </div>
+          <ConversionMetricsRow insights={p.insights} />
+          <div className="flex shrink-0 items-center gap-2 pl-1">
+            <Label htmlFor={`send-${key}`} className="text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
+              Send request
+            </Label>
+            <Switch id={`send-${key}`} checked={isSelected} onCheckedChange={(v) => setSend(key, v)} />
+          </div>
+        </div>
+        {overlapWarning && isSelected && (
+          <p className="mt-2 text-xs text-amber-700 flex items-start gap-1.5">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+            {overlapWarning}
+          </p>
+        )}
+      </li>
+    );
+  };
+
+  const renderIneligibleRecipientRow = (p: OutreachRecipientRow) => {
+    const key = partyKey(p);
+    const isSelected = !!sendMap[key];
+    const reasons = p.outreachLimitReasons ?? [];
+    const reasonLine = reasons.map((r) => r.detail).join(' · ');
+    return (
+      <li key={key} className="bg-muted/20">
+        <div className={cn('px-4 py-2.5', isSelected && 'bg-muted/35')}>
+          <div className="flex items-start gap-3">
+            <div className="min-w-0 flex-1 opacity-80">
+              <p className="text-sm font-medium text-muted-foreground">{p.name}</p>
+              <p className="text-xs text-muted-foreground truncate">{p.email || 'No email on file'}</p>
+              {reasonLine ? (
+                <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{reasonLine}</p>
+              ) : null}
+            </div>
+            <ConversionMetricsRow insights={p.insights} muted />
+            <div className="flex shrink-0 items-center gap-2 pl-1 pt-0.5">
+              <Label htmlFor={`send-${key}`} className="text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
+                Send request
+              </Label>
+              <Switch id={`send-${key}`} checked={isSelected} onCheckedChange={(v) => setSend(key, v)} />
+            </div>
+          </div>
+        </div>
+      </li>
+    );
+  };
+
   const renderGroup = (
     kind: PartyKind,
     title: string,
@@ -473,6 +629,10 @@ export function FacultativeNewRequestDialog({
       );
     }
     const included = rows.filter((p) => sendMap[partyKey(p)]).length;
+    const eligibleRows =
+      kind === 'reinsurer' ? rows.filter((p) => p.outreachEligible !== false) : rows;
+    const ineligibleRows = kind === 'reinsurer' ? rows.filter((p) => p.outreachEligible === false) : [];
+
     return (
       <div className="rounded-lg border bg-card shadow-sm overflow-hidden">
         <div className="flex items-center justify-between gap-3 border-b bg-muted/40 px-4 py-3">
@@ -496,47 +656,27 @@ export function FacultativeNewRequestDialog({
             </Button>
           </div>
         </div>
-        <ScrollArea className="max-h-[360px]">
-          <ul className="divide-y">
-            {rows.map((p) => {
-              const key = partyKey(p);
-              const { insights } = p;
-              const isSelected = !!sendMap[key];
-              const overlapWarning =
-                p.kind === 'reinsurance_broker' ? brokerOverlapWarnings[p.id] : undefined;
-              return (
-                <li key={key} className="px-4 py-2.5">
-                  <div className="flex items-center gap-3">
-                    <div className="w-40 shrink-0 min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">{p.name}</p>
-                      <p className="text-xs text-muted-foreground truncate">{p.email || 'No email on file'}</p>
-                    </div>
-                    <ConversionMetricsRow insights={insights} />
-                    <div className="flex shrink-0 items-center gap-2 pl-1">
-                      <Label
-                        htmlFor={`send-${key}`}
-                        className="text-xs text-muted-foreground cursor-pointer whitespace-nowrap"
-                      >
-                        Send request
-                      </Label>
-                      <Switch
-                        id={`send-${key}`}
-                        checked={isSelected}
-                        onCheckedChange={(v) => setSend(key, v)}
-                      />
-                    </div>
-                  </div>
-                  {overlapWarning && isSelected && (
-                    <p className="mt-2 text-xs text-amber-700 flex items-start gap-1.5">
-                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                      {overlapWarning}
-                    </p>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        </ScrollArea>
+        <ul className="divide-y">
+          {eligibleRows.map((p) =>
+            renderEligibleRecipientRow(
+              p,
+              p.kind === 'reinsurance_broker' ? brokerOverlapWarnings[p.id] : undefined,
+            ),
+          )}
+          {ineligibleRows.length > 0 && (
+            <>
+              <li className="list-none border-t border-dashed border-border bg-muted/30 px-4 py-2">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                  Other reinsurers — not eligible
+                </p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  Line, capacity, or premium constraints — you can still send a request if needed.
+                </p>
+              </li>
+              {ineligibleRows.map((p) => renderIneligibleRecipientRow(p))}
+            </>
+          )}
+        </ul>
       </div>
     );
   };
@@ -547,7 +687,7 @@ export function FacultativeNewRequestDialog({
         <DialogHeader className="px-6 pt-6 pb-4 border-b">
           <DialogTitle className="flex items-center gap-2 text-lg">
             <Shield className="h-5 w-5 shrink-0" />
-            Facultative New — outreach
+            FAC Out
           </DialogTitle>
           <DialogDescription>
             {step === 1
@@ -566,50 +706,30 @@ export function FacultativeNewRequestDialog({
             </div>
           )}
 
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-2">
-              <Label htmlFor="fac-new-ceded-si" className="text-sm font-medium whitespace-nowrap">
-                Ceded SI
-              </Label>
-              <FormattedNumberInput
-                id="fac-new-ceded-si"
-                allowDecimals={false}
-                allowEmpty
-                className="w-48 h-9 text-right tabular-nums"
-                value={cededSumInsured || undefined}
-                onChange={(v) => setCededSumInsured(v ?? 0)}
-              />
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="text-sm text-muted-foreground">Ceded Premium (derived)</span>
-              <span className="text-sm font-semibold tabular-nums">
-                {fmtAED(Math.round(cededPremiumDerived), currency)}
-              </span>
-            </div>
-          </div>
-
-          {retentionAvailable > 0 && cededSumInsured > retentionAvailable && (
-            <p className="text-xs text-destructive">
-              Ceded SI ({fmtAED(Math.round(cededSumInsured), currency)}) exceeds available retention (
-              {fmtAED(Math.round(retentionAvailable), currency)}).
-            </p>
-          )}
+          <FacultativePlacementTermsFields
+            currency={currency}
+            sumInsured={sumInsured}
+            grossPremium={grossPremium}
+            cededSumInsured={cededSumInsured}
+            onCededSumInsuredChange={setCededSumInsured}
+            terms={placementTerms}
+            onTermsChange={setPlacementTerms}
+            retentionAvailable={retentionAvailable}
+          />
 
           {step === 1 && (
             <>
               {loadingLists ? (
-                <p className="text-sm text-muted-foreground py-8 text-center">Loading directories…</p>
+                <p className="text-sm text-muted-foreground py-4 text-center">Loading reinsurers…</p>
               ) : (
-                <>
-                  {renderGroup('reinsurer', 'Reinsurers', <Shield className="h-4 w-4" />, reinsurerRows)}
-                  {renderGroup('reinsurance_broker', 'Reinsurance brokers', <Users className="h-4 w-4" />, brokerRows)}
-                </>
+                renderGroup('reinsurer', 'Reinsurers', <Shield className="h-4 w-4" />, reinsurerRows)
               )}
+              {renderGroup('reinsurance_broker', 'Reinsurance brokers', <Users className="h-4 w-4" />, brokerRows)}
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                   Cancel
                 </Button>
-                <Button type="button" onClick={handleContinue} disabled={loadingLists || parties.length === 0}>
+                <Button type="button" onClick={handleContinue} disabled={parties.length === 0}>
                   Continue to draft
                 </Button>
               </div>
