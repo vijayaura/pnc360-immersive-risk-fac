@@ -89,8 +89,6 @@ export const Login: React.FC<LoginProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { theme, isInitialized } = useMarketThemeStore();
 
-  console.log(import.meta.env.VITE_API_BASE_URL);
-
   // Existing session: decide synchronously so we never paint the login form, then navigate before paint (useLayoutEffect).
   const existingSessionForPortal = useMemo(() => {
     if (portalType === PortalType.SUPER_ADMIN) return false;

@@ -11,6 +11,10 @@ export default defineConfig(({ mode }) => {
 
   return {
     base: '/',
+    define: {
+      // Set on Vercel builds — used to force same-origin /api/v1 (see resolve-api-base-url.ts)
+      'import.meta.env.VERCEL': JSON.stringify(process.env.VERCEL ?? ''),
+    },
     server: {
       host: '::',
       port: 8080,
