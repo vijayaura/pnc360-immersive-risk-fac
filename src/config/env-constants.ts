@@ -11,7 +11,9 @@ export const ENV_NAMES = {
 } as const;
 
 export const ENV_DEFAULTS = {
+  /** Local dev when `.env` is absent */
   API_BASE_URL: 'http://localhost:3000',
+  APP_ENV: ENV_NAMES.LOCAL,
 } as const;
 
 /**

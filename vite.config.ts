@@ -10,6 +10,7 @@ export default defineConfig(({ mode }) => {
   const apiProxyTarget = env.API_PROXY_TARGET;
 
   return {
+    base: '/',
     server: {
       host: '::',
       port: 8080,
@@ -35,6 +36,7 @@ export default defineConfig(({ mode }) => {
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
           cleanupOutdatedCaches: true,
+          navigateFallbackDenylist: [/^\/assets\//, /\.js$/, /\.css$/, /\.map$/],
         },
         devOptions: {
           enabled: false, // Disable in development
